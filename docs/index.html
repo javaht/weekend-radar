@@ -1592,7 +1592,7 @@
       function clearLightnings() {
         lightnings.forEach(L => {
           root.remove(L.line);
-          root.remove(L.halo);
+          (L.halos || []).forEach(h => { root.remove(h); h.material.dispose(); });
           root.remove(L.tip);
           root.remove(L.landRing);
           root.remove(L.flash);
@@ -1603,8 +1603,6 @@
           });
           L.line.geometry.dispose();
           L.line.material.dispose();
-          L.halo.geometry.dispose();
-          L.halo.material.dispose();
           L.tip.geometry.dispose();
           L.tip.material.dispose();
           L.landRing.geometry.dispose();
@@ -1664,19 +1662,24 @@
         }));
         root.add(line);
 
-        const halo = new THREE.Line(geo, new THREE.LineBasicMaterial({
-          color: 0x93c5fd,
-          transparent: true,
-          opacity: 0.35,
-          blending: THREE.AdditiveBlending,
-          depthWrite: false
-        }));
-        halo.scale.setScalar(1.001);
-        root.add(halo);
+        // Three offset glow passes fake a thicker stroke (WebGL ignores linewidth)
+        const halos = [];
+        [[0.016, 0, 0], [-0.011, 0.01, 0.008], [0, 0, 0.018]].forEach((off) => {
+          const halo = new THREE.Line(geo, new THREE.LineBasicMaterial({
+            color: 0x93c5fd,
+            transparent: true,
+            opacity: 0.4,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false
+          }));
+          halo.position.set(off[0], off[1], off[2]);
+          root.add(halo);
+          halos.push(halo);
+        });
 
         // A short tapered arrow head at the leading tip of the descending bolt
-        const headGeo = new THREE.ConeGeometry(0.04, 0.22, 4, 1);
-        headGeo.translate(0, 0.11, 0);
+        const headGeo = new THREE.ConeGeometry(0.058, 0.32, 4, 1);
+        headGeo.translate(0, 0.16, 0);
         const tip = new THREE.Mesh(headGeo, new THREE.MeshBasicMaterial({
           color: 0xfff3c4,
           transparent: true,
@@ -1685,7 +1688,7 @@
         }));
         root.add(tip);
 
-        const landGeo = new THREE.RingGeometry(0.06, 0.095, 48);
+        const landGeo = new THREE.RingGeometry(0.085, 0.13, 48);
         landGeo.rotateX(-Math.PI / 2);
         const landRing = new THREE.Mesh(landGeo, new THREE.MeshBasicMaterial({
           color: 0xffb300, transparent: true, opacity: 0, side: THREE.DoubleSide,
@@ -1704,16 +1707,16 @@
           depthWrite: false
         }));
         flash.position.set(tx, ty + 0.02, tz);
-        flash.scale.set(0.6, 0.6, 1);
+        flash.scale.set(0.85, 0.85, 1);
         root.add(flash);
 
         lightnings.push({
           target,
-          N, pts, line, halo, tip, landRing, flash,
+          N, pts, line, halos, tip, landRing, flash,
           branches: [],
           landT: -1,
           progress: 0,
-          speed: 3.2 + Math.random() * 1.4,
+          speed: 2.0 + Math.random() * 0.8,
           life: 0,
           branched: false
         });
@@ -1777,10 +1780,10 @@
             const flicker = Math.max(0, Math.sin(L.life * 38)) * 0.6 + 0.4;
             const fade = Math.max(0, 0.95 - L.life * 2.4);
             L.line.material.opacity = fade * flicker;
-            L.halo.material.opacity = fade * 0.4 * flicker;
+            (L.halos || []).forEach(h => { h.material.opacity = fade * 0.42 * flicker; });
             L.tip.material.opacity = 0;
             L.flash.material.opacity = Math.max(0, 0.9 - L.life * 2.0);
-            const fs = 0.6 + L.life * 1.6;
+            const fs = 0.85 + L.life * 2.1;
             L.flash.scale.set(fs, fs, 1);
             (L.branches || []).forEach(b => {
               b.material.opacity = fade * 0.55 * flicker;
@@ -1788,7 +1791,7 @@
 
             if (fade <= 0.01) {
               root.remove(L.line);
-              root.remove(L.halo);
+              (L.halos || []).forEach(h => { root.remove(h); h.material.dispose(); });
               root.remove(L.tip);
               root.remove(L.landRing);
               root.remove(L.flash);
@@ -1799,8 +1802,6 @@
               });
               L.line.geometry.dispose();
               L.line.material.dispose();
-              L.halo.geometry.dispose();
-              L.halo.material.dispose();
               L.tip.geometry.dispose();
               L.tip.material.dispose();
               L.landRing.geometry.dispose();
@@ -1816,7 +1817,7 @@
           L.progress = Math.min(1, L.progress + dt * L.speed);
           const count = Math.max(2, Math.round(L.progress * (N - 1)) + 1);
           L.line.geometry.setDrawRange(0, count);
-          L.halo.geometry.setDrawRange(0, count);
+          (L.halos || []).forEach(h => { h.geometry.setDrawRange(0, count); });
 
           const ti = count - 1;
           const tipX = L.pts[ti * 3];
@@ -1855,7 +1856,7 @@
             L.landT += dt;
             const s = 1 + L.landT * 16;
             L.landRing.scale.set(s, 1, s);
-            L.landRing.material.opacity = Math.max(0, 0.85 - L.landT * 2.1);
+            L.landRing.material.opacity = Math.max(0, 0.88 - L.landT * 1.9);
           }
         }
       }
