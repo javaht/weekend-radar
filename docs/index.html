@@ -1662,7 +1662,7 @@
 
         // 5 offset passes fake a thick stroke (WebGL ignores linewidth), + 3 glow passes
         const strokes = [];
-        [[0.02, 0, 0], [-0.014, 0, 0.014], [0.008, 0, -0.019], [0, 0, 0.022], [-0.021, 0, -0.007]].forEach((off) => {
+        [[0.014, 0, 0], [-0.01, 0, 0.009], [0.006, 0, -0.012]].forEach((off) => {
           const s = new THREE.Line(geo, new THREE.LineBasicMaterial({
             color: 0xffffff,
             transparent: true,
@@ -1675,7 +1675,7 @@
           strokes.push(s);
         });
         const halos = [];
-        [[0.038, 0, 0], [-0.03, 0, 0.026], [0.016, 0, -0.034]].forEach((off) => {
+        [[0.024, 0, 0], [-0.019, 0, 0.015]].forEach((off) => {
           const halo = new THREE.Line(geo, new THREE.LineBasicMaterial({
             color: 0x93c5fd,
             transparent: true,
