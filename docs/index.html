@@ -943,6 +943,11 @@
         <button class="seg-btn" data-city="成都" data-magnetic>成都 <span class="code-tag">510100</span></button>
         <button class="seg-btn" data-city="武汉" data-magnetic>武汉 <span class="code-tag">420100</span></button>
         <button class="seg-btn" data-city="南京" data-magnetic>南京 <span class="code-tag">320100</span></button>
+        <button class="seg-btn" data-city="西安" data-magnetic>西安 <span class="code-tag">610100</span></button>
+        <button class="seg-btn" data-city="重庆" data-magnetic>重庆 <span class="code-tag">500000</span></button>
+        <button class="seg-btn" data-city="苏州" data-magnetic>苏州 <span class="code-tag">320500</span></button>
+        <button class="seg-btn" data-city="天津" data-magnetic>天津 <span class="code-tag">120000</span></button>
+        <button class="seg-btn" data-city="长沙" data-magnetic>长沙 <span class="code-tag">430100</span></button>
       </div>
 
       <!-- THREE.JS TITANIUM MONOCHROME + ACCENT STAGE -->
@@ -1195,6 +1200,7 @@ bendibao (10-31, "待核实") + bili (10-31~11-01, "¥168-399")
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+  <script src="./cities-geo.js"></script>
   <script>
     // =========================================================================
     // 1. DATA & PRESETS
@@ -1372,7 +1378,7 @@ bendibao (10-31, "待核实") + bili (10-31~11-01, "¥168-399")
     })();
 
     // =========================================================================
-    // 3. THREE.JS TITANIUM MONOCHROME + INTERACTIVE TOUCH ACOUSTIC RADAR
+    // 3. THREE.JS 3D CITY MAP SILHOUETTE + DISTRICT MESH + TOUCH PARTICLE FIELD
     // =========================================================================
     let emitThreeShockwave = () => {};
     let switchThreeCity = () => {};
@@ -1383,11 +1389,11 @@ bendibao (10-31, "待核实") + bili (10-31~11-01, "¥168-399")
       if (!canvas || typeof THREE === "undefined") return;
 
       const scene = new THREE.Scene();
-      scene.fog = new THREE.FogExp2(0x050507, 0.09);
+      scene.fog = new THREE.FogExp2(0x050507, 0.075);
 
       const camera = new THREE.PerspectiveCamera(38, stage.clientWidth / stage.clientHeight, 0.1, 100);
-      camera.position.set(0, 4.1, 5.5);
-      camera.lookAt(0, -0.1, 0);
+      camera.position.set(0, 4.35, 4.95);
+      camera.lookAt(0, -0.08, 0);
 
       const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -1396,109 +1402,156 @@ bendibao (10-31, "待核实") + bili (10-31~11-01, "¥168-399")
       const root = new THREE.Group();
       scene.add(root);
 
-      const radius = 2.85;
+      // Subtle reference coordinate crosshairs underneath the city slab (non-circular)
+      const axisPts = [
+        new THREE.Vector3(-2.8, -0.18, 0), new THREE.Vector3(2.8, -0.18, 0),
+        new THREE.Vector3(0, -0.18, -2.8), new THREE.Vector3(0, -0.18, 2.8)
+      ];
+      root.add(new THREE.LineSegments(
+        new THREE.BufferGeometry().setFromPoints(axisPts),
+        new THREE.LineBasicMaterial({ color: 0x3f3f46, transparent: true, opacity: 0.25 })
+      ));
 
-      // 1) Monochrome Titanium Hairline Rings
-      [0.7, 1.4, 2.1, radius].forEach((r, idx) => {
-        const pts = [];
-        for (let i = 0; i <= 160; i++) {
-          const a = (i / 160) * Math.PI * 2;
-          pts.push(new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r));
-        }
-        const geo = new THREE.BufferGeometry().setFromPoints(pts);
-        const mat = new THREE.LineBasicMaterial({
-          color: idx === 3 ? 0xe4e4e7 : 0x71717a,
-          transparent: true,
-          opacity: idx === 3 ? 0.35 : 0.16
-        });
-        root.add(new THREE.Line(geo, mat));
-      });
-
-      // Fine degree tick marks on outer ring
-      const tickPts = [];
-      for (let i = 0; i < 72; i++) {
-        const a = (i / 72) * Math.PI * 2;
-        const inner = i % 6 === 0 ? radius - 0.12 : radius - 0.05;
-        tickPts.push(
-          new THREE.Vector3(Math.cos(a) * inner, 0, Math.sin(a) * inner),
-          new THREE.Vector3(Math.cos(a) * radius, 0, Math.sin(a) * radius)
-        );
-      }
-      const tickGeo = new THREE.BufferGeometry().setFromPoints(tickPts);
-      root.add(new THREE.LineSegments(tickGeo, new THREE.LineBasicMaterial({
-        color: 0xa1a1aa,
-        transparent: true,
-        opacity: 0.3
-      })));
-
-      // 2) Interactive Silver-White Acoustic Particle Field (deforms under cursor!)
-      const gridN = 36;
-      const posArr = [];
-      const basePos = [];
-      for (let gx = -gridN; gx <= gridN; gx++) {
-        for (let gz = -gridN; gz <= gridN; gz++) {
-          const x = (gx / gridN) * radius;
-          const z = (gz / gridN) * radius;
-          const d = Math.hypot(x, z);
-          if (d <= radius * 0.985) {
-            posArr.push(x, 0, z);
-            basePos.push({ x, z, d });
-          }
-        }
-      }
-      const cloudGeo = new THREE.BufferGeometry();
-      cloudGeo.setAttribute("position", new THREE.Float32BufferAttribute(posArr, 3));
-      const cloudMat = new THREE.PointsMaterial({
-        color: 0xf4f4f5,
-        size: 0.024,
-        transparent: true,
-        opacity: 0.52
-      });
-      const cloud = new THREE.Points(cloudGeo, cloudMat);
-      root.add(cloud);
-
-      // 3) Subtle Silver Radar Sweep Beam
-      const sweepGeo = new THREE.BufferGeometry();
-      const segs = 32;
-      const arc = Math.PI * 0.28;
-      const sPos = [];
-      const sCol = [];
-      for (let i = 0; i < segs; i++) {
-        const a1 = (i / segs) * arc;
-        const a2 = ((i + 1) / segs) * arc;
-        const w1 = Math.pow(1 - i / segs, 2.0) * 0.22;
-        const w2 = Math.pow(1 - (i + 1) / segs, 2.0) * 0.22;
-        sPos.push(
-          0, 0.01, 0,
-          Math.cos(a1) * radius, 0.01, Math.sin(a1) * radius,
-          Math.cos(a2) * radius, 0.01, Math.sin(a2) * radius
-        );
-        sCol.push(1, 1, 1, w1, 1, 1, 1, w1, 1, 1, 1, w2);
-      }
-      sweepGeo.setAttribute("position", new THREE.Float32BufferAttribute(sPos, 3));
-      sweepGeo.setAttribute("color", new THREE.Float32BufferAttribute(sCol, 4));
-      const sweepMesh = new THREE.Mesh(sweepGeo, new THREE.MeshBasicMaterial({
-        vertexColors: true,
-        transparent: true,
-        side: THREE.DoubleSide,
-        depthWrite: false,
-        blending: THREE.AdditiveBlending
-      }));
-      const leadLine = new THREE.Line(
-        new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0.015, 0), new THREE.Vector3(radius, 0.015, 0)]),
-        new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.75 })
-      );
-      sweepMesh.add(leadLine);
-      root.add(sweepMesh);
-
-      // 4) Sparse, Jewel-Like Signal Beacons (White/Silver + a few Action Orange / Blue / Green accents)
+      // Groups that rebuild when switching city
+      const mapWireGroup = new THREE.Group();
       const beaconGroup = new THREE.Group();
+      root.add(mapWireGroup);
       root.add(beaconGroup);
+
+      let cloudPoints = null;
+      let cloudGeo = null;
+      let basePos = [];
       const beacons = [];
 
-      function buildCityBeacons(cityName) {
-        while (beaconGroup.children.length) beaconGroup.remove(beaconGroup.children[0]);
+      // 2D Ray-casting Point-in-Polygon helper
+      function pointInRing(x, z, ring) {
+        let inside = false;
+        for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+          const xi = ring[i][0], zi = ring[i][1];
+          const xj = ring[j][0], zj = ring[j][1];
+          const intersect = ((zi > z) !== (zj > z)) &&
+            (x < (xj - xi) * (z - zi) / ((zj - zi) || 1e-9) + xi);
+          if (intersect) inside = !inside;
+        }
+        return inside;
+      }
+
+      function pointInCity(x, z, outerRings) {
+        for (let i = 0; i < outerRings.length; i++) {
+          if (pointInRing(x, z, outerRings[i])) return true;
+        }
+        return false;
+      }
+
+      function disposeGroup(grp) {
+        while (grp.children.length) {
+          const obj = grp.children[0];
+          grp.remove(obj);
+          if (obj.geometry) obj.geometry.dispose();
+          if (obj.material) obj.material.dispose();
+        }
+      }
+
+      function buildCityMap(cityName) {
+        disposeGroup(mapWireGroup);
+        disposeGroup(beaconGroup);
         beacons.length = 0;
+        basePos = [];
+
+        if (cloudPoints) {
+          root.remove(cloudPoints);
+          cloudGeo.dispose();
+          cloudPoints.material.dispose();
+          cloudPoints = null;
+        }
+
+        const geoData = (window.CITY_GEO && window.CITY_GEO[cityName]) || (window.CITY_GEO && window.CITY_GEO["北京"]);
+        if (!geoData) return;
+
+        const outerRings = geoData.outer || [];
+        const distRings = geoData.districts || [];
+        const slabDepth = -0.18;
+
+        // 1) Internal District Division Lines (Subtle Space Gray)
+        const distMat = new THREE.LineBasicMaterial({
+          color: 0xa1a1aa,
+          transparent: true,
+          opacity: 0.22
+        });
+        distRings.forEach((ring) => {
+          const pts = ring.map(p => new THREE.Vector3(p[0], 0.004, p[1]));
+          pts.push(new THREE.Vector3(ring[0][0], 0.004, ring[0][1]));
+          mapWireGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), distMat));
+        });
+
+        // 2) Crisp Titanium-White Top Outer Boundary + Extruded Base Rim + Vertical Edge Struts
+        const topRimMat = new THREE.LineBasicMaterial({
+          color: 0xfafafa,
+          transparent: true,
+          opacity: 0.92
+        });
+        const botRimMat = new THREE.LineBasicMaterial({
+          color: 0x52525b,
+          transparent: true,
+          opacity: 0.42
+        });
+        const strutPts = [];
+
+        outerRings.forEach((ring) => {
+          const topPts = [];
+          const botPts = [];
+          ring.forEach((p, idx) => {
+            topPts.push(new THREE.Vector3(p[0], 0.01, p[1]));
+            botPts.push(new THREE.Vector3(p[0], slabDepth, p[1]));
+            if (idx % 3 === 0) {
+              strutPts.push(
+                new THREE.Vector3(p[0], 0.01, p[1]),
+                new THREE.Vector3(p[0], slabDepth, p[1])
+              );
+            }
+          });
+          topPts.push(new THREE.Vector3(ring[0][0], 0.01, ring[0][1]));
+          botPts.push(new THREE.Vector3(ring[0][0], slabDepth, ring[0][1]));
+
+          mapWireGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(topPts), topRimMat));
+          mapWireGroup.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(botPts), botRimMat));
+        });
+
+        if (strutPts.length) {
+          mapWireGroup.add(new THREE.LineSegments(
+            new THREE.BufferGeometry().setFromPoints(strutPts),
+            new THREE.LineBasicMaterial({ color: 0x71717a, transparent: true, opacity: 0.25 })
+          ));
+        }
+
+        // 3) Acoustic Particle Lattice Strictly Clipped Inside the City Map Silhouette
+        const posArr = [];
+        const colArr = [];
+        const step = 0.072;
+        for (let x = -2.45; x <= 2.45; x += step) {
+          for (let z = -2.45; z <= 2.45; z += step) {
+            if (pointInCity(x, z, outerRings)) {
+              const d = Math.hypot(x, z);
+              posArr.push(x, 0, z);
+              colArr.push(0.72, 0.72, 0.76);
+              basePos.push({ x, z, d });
+            }
+          }
+        }
+
+        cloudGeo = new THREE.BufferGeometry();
+        cloudGeo.setAttribute("position", new THREE.Float32BufferAttribute(posArr, 3));
+        cloudGeo.setAttribute("color", new THREE.Float32BufferAttribute(colArr, 3));
+        const cloudMat = new THREE.PointsMaterial({
+          size: 0.028,
+          vertexColors: true,
+          transparent: true,
+          opacity: 0.78
+        });
+        cloudPoints = new THREE.Points(cloudGeo, cloudMat);
+        root.add(cloudPoints);
+
+        // 4) City-Bounded Signal Beacons (Sampled from interior points)
         const info = CITY_DATA[cityName] || CITY_DATA["北京"];
         let seed = parseInt(info.adcode || "110000", 10);
         const rand = () => {
@@ -1507,37 +1560,52 @@ bendibao (10-31, "待核实") + bili (10-31~11-01, "¥168-399")
         };
 
         const count = info.nodes || 24;
-        for (let i = 0; i < count; i++) {
-          const r = 0.28 + Math.sqrt(rand()) * (radius * 0.84);
-          const theta = rand() * Math.PI * 2;
-          const x = Math.cos(theta) * r;
-          const z = Math.sin(theta) * r;
-          const h = 0.14 + rand() * 0.48;
+        if (basePos.length > 0) {
+          for (let i = 0; i < count; i++) {
+            // Bias slightly toward urban center by picking closer of 2 random interior points
+            const p1 = basePos[Math.floor(rand() * basePos.length)];
+            const p2 = basePos[Math.floor(rand() * basePos.length)];
+            const chosen = (i < count * 0.65 && p1.d > p2.d) ? p2 : p1;
+            const x = chosen.x + (rand() - 0.5) * 0.03;
+            const z = chosen.z + (rand() - 0.5) * 0.03;
+            const h = 0.16 + rand() * 0.46;
 
-          // 70% crisp monochrome white/silver, 30% jewel accent (Orange / Blue / Green)
-          let color = 0xe4e4e7;
-          if (i < 3) color = 0xff5500;       // Action Orange focal events
-          else if (i < 6) color = 0x0a84ff;  // Electric Blue tech events
-          else if (i < 9) color = 0x30d158;  // Mint Green free exhibitions
+            // Monochrome silver + sparse jewel accents (Orange / Blue / Green)
+            let color = 0xe4e4e7;
+            if (i < 4) color = 0xff5500;       // Action Orange focal events
+            else if (i < 8) color = 0x0a84ff;  // Electric Blue tech events
+            else if (i < 12) color = 0x30d158; // Mint Green exhibitions
 
-          const stemMat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: i < 9 ? 0.65 : 0.3 });
-          const stem = new THREE.Line(
-            new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x, 0, z), new THREE.Vector3(x, h, z)]),
-            stemMat
-          );
-          beaconGroup.add(stem);
+            const stemMat = new THREE.LineBasicMaterial({
+              color,
+              transparent: true,
+              opacity: i < 12 ? 0.75 : 0.32
+            });
+            const stem = new THREE.Line(
+              new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x, 0, z), new THREE.Vector3(x, h, z)]),
+              stemMat
+            );
+            beaconGroup.add(stem);
 
-          const tipGeo = new THREE.SphereGeometry(i < 3 ? 0.045 : 0.03, 14, 14);
-          const tipMat = new THREE.MeshBasicMaterial({ color });
-          const tip = new THREE.Mesh(tipGeo, tipMat);
-          tip.position.set(x, h, z);
-          beaconGroup.add(tip);
+            const tipGeo = new THREE.SphereGeometry(i < 4 ? 0.048 : 0.032, 14, 14);
+            const tipMat = new THREE.MeshBasicMaterial({ color });
+            const tip = new THREE.Mesh(tipGeo, tipMat);
+            tip.position.set(x, h, z);
+            beaconGroup.add(tip);
 
-          beacons.push({
-            x, z, baseH: h,
-            theta: (theta + Math.PI * 2) % (Math.PI * 2),
-            tip, stem, stemMat, flare: 0
-          });
+            if (i < 12) {
+              const padGeo = new THREE.RingGeometry(0.045, 0.072, 24);
+              padGeo.rotateX(-Math.PI / 2);
+              const pad = new THREE.Mesh(
+                padGeo,
+                new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.4, side: THREE.DoubleSide })
+              );
+              pad.position.set(x, 0.012, z);
+              beaconGroup.add(pad);
+            }
+
+            beacons.push({ x, z, baseH: h, tip, stemMat, flare: 0 });
+          }
         }
       }
 
@@ -1559,16 +1627,18 @@ bendibao (10-31, "待核实") + bili (10-31~11-01, "¥168-399")
       };
 
       let targetRotY = 0;
-      let targetRotX = 0.05;
+      let targetRotX = 0.06;
+      let transitionScale = 1;
+
       switchThreeCity = function (cityName) {
-        buildCityBeacons(cityName);
+        buildCityMap(cityName);
+        transitionScale = 0.86;
         emitThreeShockwave(0, 0, 0xff5500);
-        targetRotY += 0.35;
       };
 
-      buildCityBeacons("北京");
+      buildCityMap("北京");
 
-      // Raycaster for direct 3D mouse-touch water/ferrofluid depression on the plane
+      // Raycaster for direct 3D mouse-touch deformation on the city map
       const raycaster = new THREE.Raycaster();
       const pointerNDC = new THREE.Vector2(99, 99);
       const hitPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
@@ -1599,7 +1669,7 @@ bendibao (10-31, "待核实") + bili (10-31~11-01, "¥168-399")
         dragging = true;
         lastX = e.clientX;
         lastY = e.clientY;
-        if (localHit.length() <= radius) {
+        if (localHit.length() <= 3.0) {
           emitThreeShockwave(localHit.x, localHit.z, 0xff5500);
         } else {
           emitThreeShockwave(0, 0, 0xffffff);
@@ -1620,13 +1690,16 @@ bendibao (10-31, "待核实") + bili (10-31~11-01, "¥168-399")
         const dt = clock.getDelta();
         const t = clock.getElapsedTime();
 
-        sweepMesh.rotation.y -= dt * 0.95;
-        const beamAngle = ((-sweepMesh.rotation.y) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+        // Holographic linear scan wave sweeping across the city map (north-to-south)
+        const scanZ = ((t * 1.15) % 5.6) - 2.8;
 
-        root.rotation.y += (targetRotY - root.rotation.y) * 0.07;
-        root.rotation.x += (targetRotX - root.rotation.x) * 0.07;
+        // Smoothly damp rotation and city switch spring scale
+        root.rotation.y += (targetRotY - root.rotation.y) * 0.08;
+        root.rotation.x += (targetRotX - root.rotation.x) * 0.08;
+        transitionScale += (1 - transitionScale) * 0.12;
+        root.scale.set(transitionScale, transitionScale, transitionScale);
 
-        // Compute 3D cursor intersection on the radar plane
+        // Compute 3D cursor intersection on the city plane
         if (pointerNDC.x < 10) {
           raycaster.setFromCamera(pointerNDC, camera);
           if (raycaster.ray.intersectPlane(hitPlane, hitPoint)) {
@@ -1637,44 +1710,62 @@ bendibao (10-31, "待核实") + bili (10-31~11-01, "¥168-399")
           localHit.set(99, 0, 99);
         }
 
-        // Deform particle field: gentle breathing wave + tactile cursor magnetic ripple
-        const pos = cloudGeo.getAttribute("position");
-        for (let i = 0; i < basePos.length; i++) {
-          const bp = basePos[i];
-          let y = Math.sin(bp.d * 2.8 - t * 1.8) * 0.032;
+        // Deform & illuminate city particle lattice
+        if (cloudGeo && basePos.length) {
+          const pos = cloudGeo.getAttribute("position");
+          const col = cloudGeo.getAttribute("color");
+          for (let i = 0; i < basePos.length; i++) {
+            const bp = basePos[i];
+            let y = Math.sin(bp.x * 1.8 + bp.z * 1.8 - t * 1.6) * 0.022;
+            let glow = 0;
 
-          // Cursor touch magnetic elevation
-          const distCursor = Math.hypot(bp.x - localHit.x, bp.z - localHit.z);
-          if (distCursor < 0.85) {
-            const factor = Math.cos((distCursor / 0.85) * (Math.PI / 2));
-            y += factor * factor * 0.22;
-          }
-
-          // Shockwave ring displacement
-          for (let w = 0; w < waves.length; w++) {
-            const dWave = Math.abs(Math.hypot(bp.x - waves[w].x, bp.z - waves[w].z) - waves[w].radius);
-            if (dWave < 0.22) {
-              y += (1 - dWave / 0.22) * 0.12 * waves[w].mat.opacity;
+            // Scan line pass highlight
+            const dScan = Math.abs(bp.z - scanZ);
+            if (dScan < 0.28) {
+              const sFactor = 1 - dScan / 0.28;
+              y += sFactor * 0.045;
+              glow = Math.max(glow, sFactor * 0.85);
             }
+
+            // Cursor touch magnetic elevation
+            const distCursor = Math.hypot(bp.x - localHit.x, bp.z - localHit.z);
+            if (distCursor < 0.78) {
+              const factor = Math.cos((distCursor / 0.78) * (Math.PI / 2));
+              y += factor * factor * 0.24;
+              glow = Math.max(glow, factor);
+            }
+
+            // Shockwave ring displacement
+            for (let w = 0; w < waves.length; w++) {
+              const dWave = Math.abs(Math.hypot(bp.x - waves[w].x, bp.z - waves[w].z) - waves[w].radius);
+              if (dWave < 0.22) {
+                const wf = (1 - dWave / 0.22) * waves[w].mat.opacity;
+                y += wf * 0.14;
+                glow = Math.max(glow, wf);
+              }
+            }
+
+            pos.setY(i, y);
+            const cVal = 0.58 + glow * 0.42;
+            col.setXYZ(i, cVal, cVal, cVal + 0.04);
           }
-
-          pos.setY(i, y);
+          pos.needsUpdate = true;
+          col.needsUpdate = true;
         }
-        pos.needsUpdate = true;
 
-        // Beacon illumination when swept or touched
+        // Beacon illumination when scan wave passes or cursor touches nearby
         for (let i = 0; i < beacons.length; i++) {
           const b = beacons[i];
-          const angleDiff = Math.abs(beamAngle - b.theta);
+          const nearScan = Math.abs(b.z - scanZ) < 0.22;
           const nearCursor = Math.hypot(b.x - localHit.x, b.z - localHit.z) < 0.55;
-          if (angleDiff < 0.1 || angleDiff > Math.PI * 2 - 0.1 || nearCursor) {
+          if (nearScan || nearCursor) {
             b.flare = 1.0;
           } else {
-            b.flare = Math.max(0, b.flare - dt * 1.1);
+            b.flare = Math.max(0, b.flare - dt * 1.2);
           }
           const scale = 1 + b.flare * 0.75;
           b.tip.scale.set(scale, scale, scale);
-          b.tip.position.y = b.baseH + b.flare * 0.06;
+          b.tip.position.y = b.baseH + b.flare * 0.07;
         }
 
         // Update expanding shockwaves
@@ -1683,7 +1774,7 @@ bendibao (10-31, "待核实") + bili (10-31~11-01, "¥168-399")
           w.s += dt * 22;
           w.radius = 0.05 * w.s;
           w.mesh.scale.set(w.s, w.s, 1);
-          w.mat.opacity = Math.max(0, 0.85 - w.s / 38);
+          w.mat.opacity = Math.max(0, 0.85 - w.s / 36);
           if (w.mat.opacity <= 0.01) {
             root.remove(w.mesh);
             w.mesh.geometry.dispose();
