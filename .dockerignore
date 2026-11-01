@@ -1,0 +1,9 @@
+__pycache__/
+*.py[cod]
+.git/
+.gitignore
+.DS_Store
+data/*.sqlite*
+data/*.log
+data/reports/*.md
+tests/_selftest*

@@ -1,0 +1,5 @@
+# 只依赖 requests。
+# HTML 解析用标准库正则（见 sources/html_sources.py），不需要 bs4/lxml。
+# 不做浏览器自动化（Playwright/Selenium）：服务器上装 Chromium 是新增的故障面，
+# 而大麦和 B站都有可用的 JSON 接口，没必要为此付出代价。
+requests>=2.28
