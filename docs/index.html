@@ -433,6 +433,37 @@
       vertical-align: middle;
     }
 
+    .dot-amber {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #ffb300;
+      box-shadow: 0 0 8px rgba(255, 179, 0, 0.75);
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+
+    .dot-white {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #fafafa;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+
+    .dot-silver {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: #a1a1aa;
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+
     .stage-hud-bottom {
       position: absolute;
       bottom: 20px;
@@ -993,11 +1024,11 @@
 
         <div class="stage-hud-bottom">
           <div class="legend-bar">
-            <span><i class="dot-orange"></i>焦点新增 / 临近截止</span>
-            <span><i class="dot-blue"></i>技术沙龙 / 开源聚会</span>
-            <span><i class="dot-green"></i>常驻特展 / 漫展市集</span>
+            <span><i class="dot-amber"></i>金色节点 = 闪电经过的活动区</span>
+            <span><i class="dot-white"></i>白色节点 = 待点亮城区</span>
+            <span><i class="dot-silver"></i>银白电弧 = 跨区活动流</span>
           </div>
-          <div class="stage-hint">触控或划过水面激起脉冲 · 拖拽旋转视角</div>
+          <div class="stage-hint">闪电自动在区间穿行 · 拖拽旋转视角 · 点击激起脉冲</div>
         </div>
       </div>
 
@@ -1327,6 +1358,10 @@
       let cloudGeo = null;
       let basePos = [];
       const beacons = [];
+      const lightnings = [];
+      let lastSpawn = -1e9;
+      const GOLD = new THREE.Color(0xffb300);
+      const SILVER = new THREE.Color(0xe4e4e7);
       const labelLayer = document.getElementById("district-label-layer");
       let districtLabels = [];
 
@@ -1516,68 +1551,214 @@
         cloudPoints = new THREE.Points(cloudGeo, cloudMat);
         root.add(cloudPoints);
 
-        // 4) City-Bounded Signal Beacons (Sampled from interior points)
-        const info = CITY_DATA[cityName] || CITY_DATA["北京"];
-        let seed = parseInt(info.adcode || "110000", 10);
-        const rand = () => {
-          seed = (seed * 1664525 + 1013904223) % 4294967296;
-          return seed / 4294967296;
-        };
+        // 4) District Event Nodes (one per district centroid) — white by default, gold when lightning passes
+        const geoForNodes = (window.CITY_GEO && window.CITY_GEO[cityName]) || (window.CITY_GEO && window.CITY_GEO["北京"]);
+        const nodeItems = (geoForNodes && geoForNodes.labels) || [];
+        nodeItems.forEach((item, idx) => {
+          const x = item.p[0];
+          const z = item.p[1];
+          const h = 0.12 + (idx % 5) * 0.055;
 
-        const count = info.nodes || 24;
-        if (basePos.length > 0) {
-          for (let i = 0; i < count; i++) {
-            // Bias slightly toward urban center by picking closer of 2 random interior points
-            const p1 = basePos[Math.floor(rand() * basePos.length)];
-            const p2 = basePos[Math.floor(rand() * basePos.length)];
-            const chosen = (i < count * 0.65 && p1.d > p2.d) ? p2 : p1;
-            const x = chosen.x + (rand() - 0.5) * 0.03;
-            const z = chosen.z + (rand() - 0.5) * 0.03;
-            const h = 0.16 + rand() * 0.46;
+          const stemMat = new THREE.LineBasicMaterial({
+            color: 0xfafafa,
+            transparent: true,
+            opacity: 0.42
+          });
+          const stem = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x, 0, z), new THREE.Vector3(x, h, z)]),
+            stemMat
+          );
+          beaconGroup.add(stem);
 
-            // Monochrome silver + sparse jewel accents (Orange / Blue / Green)
-            let color = 0xe4e4e7;
-            if (i < 4) color = 0xff5500;       // Action Orange focal events
-            else if (i < 8) color = 0x0a84ff;  // Electric Blue tech events
-            else if (i < 12) color = 0x30d158; // Mint Green exhibitions
+          const tipGeo = new THREE.SphereGeometry(0.034, 14, 14);
+          const tipMat = new THREE.MeshBasicMaterial({ color: 0xe4e4e7 });
+          const tip = new THREE.Mesh(tipGeo, tipMat);
+          tip.position.set(x, h, z);
+          beaconGroup.add(tip);
 
-            const stemMat = new THREE.LineBasicMaterial({
-              color,
-              transparent: true,
-              opacity: i < 12 ? 0.75 : 0.32
-            });
-            const stem = new THREE.Line(
-              new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x, 0, z), new THREE.Vector3(x, h, z)]),
-              stemMat
-            );
-            beaconGroup.add(stem);
+          beacons.push({ x, z, h, tip, tipMat, stemMat, gold: 0 });
+        });
 
-            const tipGeo = new THREE.SphereGeometry(i < 4 ? 0.048 : 0.032, 14, 14);
-            const tipMat = new THREE.MeshBasicMaterial({ color });
-            const tip = new THREE.Mesh(tipGeo, tipMat);
-            tip.position.set(x, h, z);
-            beaconGroup.add(tip);
-
-            if (i < 12) {
-              const padGeo = new THREE.RingGeometry(0.045, 0.072, 24);
-              padGeo.rotateX(-Math.PI / 2);
-              const pad = new THREE.Mesh(
-                padGeo,
-                new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.4, side: THREE.DoubleSide })
-              );
-              pad.position.set(x, 0.012, z);
-              beaconGroup.add(pad);
-            }
-
-            beacons.push({ x, z, baseH: h, tip, stemMat, flare: 0 });
-          }
-        }
+        // Cancel any in-flight lightning bolts when the city changes
+        clearLightnings();
 
         rebuildDistrictLabels(cityName);
       }
 
       // 5) Shockwaves on Click / City Switch
       const waves = [];
+
+      // 6) Autonomous lightning: bolts travel between district nodes, igniting them gold
+      function clearLightnings() {
+        lightnings.forEach(L => {
+          mapWireGroup.remove(L.line);
+          root.remove(L.tip);
+          mapWireGroup.remove(L.landRing);
+          L.line.geometry.dispose();
+          L.line.material.dispose();
+          L.tip.geometry.dispose();
+          L.tip.material.dispose();
+          L.landRing.geometry.dispose();
+          L.landRing.material.dispose();
+        });
+        lightnings.length = 0;
+      }
+
+      function makeLightning(a, b) {
+        const N = 16;
+        const positions = new Float32Array(N * 3);
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+        const line = new THREE.Line(geo, new THREE.LineBasicMaterial({
+          color: 0xffffff,
+          transparent: true,
+          opacity: 0.95,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false
+        }));
+        mapWireGroup.add(line);
+
+        // Arrow-shaped bolt head (elongated spike, not a round ball)
+        const headGeo = new THREE.ConeGeometry(0.035, 0.17, 4, 1);
+        headGeo.translate(0, 0.085, 0);
+        const tip = new THREE.Mesh(headGeo, new THREE.MeshBasicMaterial({
+          color: 0xffb300,
+          transparent: true,
+          opacity: 1,
+          blending: THREE.AdditiveBlending
+        }));
+        root.add(tip);
+
+        const landGeo = new THREE.RingGeometry(0.05, 0.085, 40);
+        landGeo.rotateX(-Math.PI / 2);
+        const landRing = new THREE.Mesh(landGeo, new THREE.MeshBasicMaterial({
+          color: 0xffb300, transparent: true, opacity: 0, side: THREE.DoubleSide
+        }));
+        landRing.position.set(a.x, 0.018, a.z);
+        mapWireGroup.add(landRing);
+
+        lightnings.push({
+          a, b, N, line, geo, tip, landRing,
+          landT: -1,
+          progress: 0,
+          speed: 2.4 + Math.random() * 0.9,
+          seed: Math.random() * 100,
+          life: 0,
+          hitFlag: new Array(beacons.length).fill(false)
+        });
+      }
+
+      const _v = new THREE.Vector3();
+
+      function updateLightnings(t, dt) {
+        // Spawn a new bolt every 0.55s ~ 1.05s when fewer than 3 are in flight
+        if (beacons.length >= 2 && lightnings.length < 3 && t - lastSpawn > 0.55 + Math.random() * 0.5) {
+          lastSpawn = t;
+          const ia = Math.floor(Math.random() * beacons.length);
+          let ib = Math.floor(Math.random() * beacons.length);
+          if (ib === ia) ib = (ib + 1 + Math.floor(Math.random() * (beacons.length - 1))) % beacons.length;
+          makeLightning(beacons[ia], beacons[ib]);
+        }
+
+        for (let li = lightnings.length - 1; li >= 0; li--) {
+          const L = lightnings[li];
+          const { a, b } = L;
+          const ax = a.x, ay = a.h, az = a.z;
+          const bx = b.x, by = b.h, bz = b.z;
+          const dx = bx - ax, dy = by - ay, dz = bz - az;
+          const dist = Math.hypot(dx, dy, dz) || 1e-4;
+          const ux = dx / dist, uy = dy / dist, uz = dz / dist;
+          let px = -uz, py = 0, pz = ux;
+          const pl = Math.hypot(px, py, pz);
+          if (pl < 0.2) { px = 0; py = 0; pz = 1; }
+          else { px /= pl; pz /= pl; }
+
+          // Completed: full straight bolt visible, fading out
+          if (L.progress >= 1) {
+            L.life += dt;
+            const fade = Math.max(0, 0.95 - L.life * 2.5);
+            L.line.material.opacity = fade;
+            L.tip.material.opacity = 0;
+            const seg = 1 / (L.N - 1);
+            const arr = L.geo.getAttribute("position").array;
+            for (let i = 0; i < L.N; i++) {
+              const s = i * seg;
+              const qy = 2 * (1 - s) * s;
+              const j = 0.06 * Math.sin(s * Math.PI * 5 + L.seed + t * 32) * qy;
+              arr[i * 3] = ax + dx * s + j * px;
+              arr[i * 3 + 1] = ay + dy * s + j * py;
+              arr[i * 3 + 2] = az + dz * s + j * pz;
+            }
+            L.geo.getAttribute("position").needsUpdate = true;
+            if (fade <= 0.01) {
+              mapWireGroup.remove(L.line);
+              root.remove(L.tip);
+              mapWireGroup.remove(L.landRing);
+              L.line.geometry.dispose();
+              L.line.material.dispose();
+              L.tip.geometry.dispose();
+              L.tip.material.dispose();
+              L.landRing.geometry.dispose();
+              L.landRing.material.dispose();
+              lightnings.splice(li, 1);
+            }
+            continue;
+          }
+
+          // Traveling phase: draw the straight bolt up to the flash tip
+          L.progress = Math.min(1, L.progress + dt * L.speed);
+          const seg = 1 / (L.N - 1);
+          const maxI = Math.max(2, Math.round(L.progress * (L.N - 1)));
+          const arr = L.geo.getAttribute("position").array;
+          let tipX = ax, tipY = ay, tipZ = az;
+          for (let i = 0; i < L.N; i++) {
+            const s = Math.min(i * seg, L.progress);
+            if (i <= maxI) {
+              const qy = 2 * (1 - s) * s;
+              const j = 0.06 * Math.sin(s * Math.PI * 5 + L.seed + t * 32) * qy;
+              tipX = ax + dx * s + j * px;
+              tipY = ay + dy * s + j * py;
+              tipZ = az + dz * s + j * pz;
+            }
+            arr[i * 3] = tipX;
+            arr[i * 3 + 1] = tipY;
+            arr[i * 3 + 2] = tipZ;
+          }
+          L.geo.getAttribute("position").needsUpdate = true;
+          L.tip.position.set(tipX, tipY, tipZ);
+          // Orient the arrow head along the straight flight direction
+          _v.set(ux, uy, uz);
+          L.tip.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), _v);
+
+          // The flash ignites every node it crosses
+          for (let ni = 0; ni < beacons.length; ni++) {
+            const nd = beacons[ni];
+            if (L.hitFlag[ni]) continue;
+            if (Math.hypot(nd.x - tipX, nd.z - tipZ) < 0.16 && Math.abs(nd.h - tipY) < 0.4) {
+              L.hitFlag[ni] = true;
+              nd.gold = 1;
+            }
+          }
+
+          // Arrival: land ring pulse + destination flash
+          if (L.progress >= 1) {
+            L.landT = 0;
+            b.gold = 1;
+            L.landRing.position.set(b.x, 0.018, b.z);
+          }
+        }
+
+        // Landing rings expand & fade
+        for (const L of lightnings) {
+          if (L.landT >= 0) {
+            L.landT += dt;
+            const s = 1 + L.landT * 14;
+            L.landRing.scale.set(s, 1, s);
+            L.landRing.material.opacity = Math.max(0, 0.8 - L.landT * 1.9);
+          }
+        }
+      }
+
       emitThreeShockwave = function (wx = 0, wz = 0, hex = 0xffffff) {
         const rGeo = new THREE.RingGeometry(0.04, 0.075, 72);
         rGeo.rotateX(-Math.PI / 2);
@@ -1600,7 +1781,7 @@
       switchThreeCity = function (cityName) {
         buildCityMap(cityName);
         transitionScale = 0.86;
-        emitThreeShockwave(0, 0, 0xff5500);
+        emitThreeShockwave(0, 0, 0xffb300);
       };
 
       buildCityMap("北京");
@@ -1637,7 +1818,7 @@
         lastX = e.clientX;
         lastY = e.clientY;
         if (localHit.length() <= 3.0) {
-          emitThreeShockwave(localHit.x, localHit.z, 0xff5500);
+          emitThreeShockwave(localHit.x, localHit.z, 0xffb300);
         } else {
           emitThreeShockwave(0, 0, 0xffffff);
         }
@@ -1720,20 +1901,21 @@
           col.needsUpdate = true;
         }
 
-        // Beacon illumination when scan wave passes or cursor touches nearby
+        // District nodes: white by default, gold when a lightning flash passes through
         for (let i = 0; i < beacons.length; i++) {
-          const b = beacons[i];
-          const nearScan = Math.abs(b.z - scanZ) < 0.22;
-          const nearCursor = Math.hypot(b.x - localHit.x, b.z - localHit.z) < 0.55;
-          if (nearScan || nearCursor) {
-            b.flare = 1.0;
-          } else {
-            b.flare = Math.max(0, b.flare - dt * 1.2);
-          }
-          const scale = 1 + b.flare * 0.75;
-          b.tip.scale.set(scale, scale, scale);
-          b.tip.position.y = b.baseH + b.flare * 0.07;
+          const nd = beacons[i];
+          const nearCursor = Math.hypot(nd.x - localHit.x, nd.z - localHit.z) < 0.4;
+          if (nearCursor && nd.gold < 0.55) nd.gold = 0.55;
+          nd.gold = Math.max(0, nd.gold - dt * 1.25);
+          nd.tipMat.color.copy(SILVER).lerp(GOLD, nd.gold);
+          nd.stemMat.opacity = 0.38 + nd.gold * 0.55;
+          const scale = 1 + nd.gold * 0.65;
+          nd.tip.scale.set(scale, scale, scale);
+          nd.tip.position.y = nd.h + nd.gold * 0.04;
         }
+
+        // Autonomous lightning flowing between district nodes
+        updateLightnings(t, dt);
 
         // Update expanding shockwaves
         for (let i = waves.length - 1; i >= 0; i--) {
@@ -1869,7 +2051,7 @@ ${iniLines}`;
         } else {
           state.channels.push(ch);
         }
-        emitThreeShockwave(0, 0, 0xff5500);
+        emitThreeShockwave(0, 0, 0xffb300);
         syncUI();
       });
     });
