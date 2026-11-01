@@ -261,7 +261,7 @@
     }
 
     .hero h1 {
-      font-size: clamp(40px, 6vw, 72px);
+      font-size: clamp(32px, 5.2vw, 64px);
       font-weight: 700;
       line-height: 1.06;
       letter-spacing: -0.038em;
@@ -936,7 +936,6 @@
         <span>Weekend Radar</span>
       </a>
       <nav class="nav-links">
-        <a href="#architecture" data-magnetic>架构设计</a>
         <a href="#studio" data-magnetic>配置生成器</a>
       </nav>
       <a href="https://github.com/javaht/weekend-radar" target="_blank" rel="noopener" class="nav-cta" data-magnetic>
@@ -954,7 +953,7 @@
         <span>Open Source · <strong>13 Cities</strong> · <strong>9 AI Providers</strong> · <strong>7 Webhooks</strong></span>
       </div>
 
-      <h1>活动雷达，<br/>等你参加。</h1>
+      <h1 style="white-space:nowrap">活动雷达，等你参加。</h1>
 
       <!-- Apple Segmented Control for Target City -->
       <div class="segmented-wrap" id="hero-city-seg">
@@ -1009,92 +1008,11 @@
       </div>
     </div>
 
-    <!-- SECTION 01: ARCHITECTURE BENTO GRID -->
-    <section id="architecture">
-      <div class="sec-header">
-        <div>
-          <div class="sec-eyebrow"><span class="dot-orange"></span>01 / Engineering Discipline</div>
-          <h2 class="sec-title">克制的技术选型，严苛的数据纪律。</h2>
-        </div>
-        <p class="sec-desc">
-          全身仅依赖一个 <code>requests</code> 库，拒绝为了十几个接口引入 Chromium 或庞大爬虫框架。四项核心机制全部来自真实运行踩坑。
-        </p>
-      </div>
-
-      <div class="bento-grid">
-        <div class="bento-card span-7" data-tilt>
-          <div>
-            <div class="card-meta">
-              <span>HYBRID EXTRACTION</span>
-              <span class="micro-tag"><span class="dot-blue"></span>H / J 双轨制</span>
-            </div>
-            <h3>精确字段归代码，异构网页归模型</h3>
-            <p>
-              给 18 个资讯站各写一套 CSS 选择器，等于背上 18 份随时会坏的技术债；而让大模型转述 JSON 接口里的价格，则会把 <code>¥88</code> 编造成 <code>¥80</code>。因此项目将源严格二分：B站会员购、CPP、大麦走 <strong>J 类结构化直映</strong>（分/元换算零误差），豆瓣、本地宝走 <strong>H 类全文抽取</strong>。
-            </p>
-          </div>
-          <div class="mono-snippet">
-<span class="m-comment"># 加一个平台 = config.ini 加一行 + 跑 --probe 校准，零代码改动</span>
-bili     = <span class="m-blue">J</span>|<span class="m-green">on</span> |https://show.bilibili.com/api/ticket/project/listV2
-cpp      = <span class="m-blue">J</span>|<span class="m-green">on</span> |https://www.allcpp.cn/allcpp/event/eventMainListV2.do
-bendibao = <span class="m-orange">H</span>|<span class="m-green">on</span> |https://m.{bendibao_city}.bendibao.com/xiuxian/</div>
-        </div>
-
-        <div class="bento-card span-5" data-tilt>
-          <div>
-            <div class="card-meta">
-              <span>ANTI-JITTER FINGERPRINT</span>
-              <span class="micro-tag"><span class="dot-orange"></span>confirm_runs = 2</span>
-            </div>
-            <h3>最低价锚点 + 连续两轮确认</h3>
-            <p>
-              LLM 每轮转述同一场活动，票价写法与抽取条数都会轻微波动。若按原串对比，同日跑两次会误报 14 条改价。现在指纹只取<strong>最低票价数字</strong>与<strong>场馆归一前缀</strong>，且变更连续 2 轮成立才触发推送。
-            </p>
-          </div>
-          <div class="mono-snippet">
-price_anchor(<span class="m-white">"¥80(预售)¥90(现场)"</span>)
-<span class="m-comment"># → 归一为 "80.00"，与 "¥80-158" 指纹完全一致</span></div>
-        </div>
-
-        <div class="bento-card span-5" data-tilt>
-          <div>
-            <div class="card-meta">
-              <span>FAIL-LOUD TELEMETRY</span>
-              <span class="micro-tag"><span class="dot-green"></span>显式健康度</span>
-            </div>
-            <h3>「无变化」与「没抓到」绝不混淆</h3>
-            <p>
-              全部源成功且无变化 → 安静退出；任一源失败 → <strong>必推健康告警</strong>，绝不把站点限流伪装成“今天没活动”。且只有确定性源（<code>stable_sources</code>）连续缺席才判定取消。
-            </p>
-          </div>
-          <div class="mono-snippet">
-all_ok &amp;&amp; no_diff  → <span class="m-comment">Silent (0 push)</span>
-!all_ok            → <span class="m-orange">Health Alert Push</span></div>
-        </div>
-
-        <div class="bento-card span-7" data-tilt>
-          <div>
-            <div class="card-meta">
-              <span>CROSS-SOURCE ARBITRATION</span>
-              <span class="micro-tag"><span class="dot-blue"></span>跨源质量裁决</span>
-            </div>
-            <h3>自动合并单日票档与多日展期，择优保留官方直链</h3>
-            <p>
-              当同一场漫展同时被本地宝（模糊票价、单日）与 B 站会员购（精确票价、两日展期）抓到时，合并器自动扩展为最大包容日期区间，按 <code>购票平台直链 &gt; 场馆官网 &gt; 聚合媒体</code> 覆盖 URL，并在场馆实质冲突时自动标注「待核实」。
-            </p>
-          </div>
-          <div class="mono-snippet">
-bendibao (10-31, "待核实") + bili (10-31~11-01, "¥168-399")
-<span class="m-comment"># → 合并结果: 10-31~11-01 | ¥168-399 | show.bilibili.com</span></div>
-        </div>
-      </div>
-    </section>
-
     <!-- SECTION 02: INTERACTIVE STUDIO -->
     <section id="studio">
       <div class="sec-header">
         <div>
-          <div class="sec-eyebrow"><span class="dot-blue"></span>02 / Configuration Studio</div>
+          <div class="sec-eyebrow"><span class="dot-blue"></span>01 / Configuration Studio</div>
           <h2 class="sec-title">点选即生成，开箱即部署。</h2>
         </div>
         <p class="sec-desc">
