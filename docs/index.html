@@ -1024,11 +1024,11 @@
 
         <div class="stage-hud-bottom">
           <div class="legend-bar">
-            <span><i class="dot-amber"></i>金色节点 = 闪电经过的活动区</span>
+            <span><i class="dot-amber"></i>金色节点 = 被天雷击中的活动区</span>
             <span><i class="dot-white"></i>白色节点 = 待点亮城区</span>
-            <span><i class="dot-silver"></i>银白电弧 = 跨区活动流</span>
+            <span><i class="dot-silver"></i>分形电弧 = 从天而降的闪电</span>
           </div>
-          <div class="stage-hint">闪电自动在区间穿行 · 拖拽旋转视角 · 点击激起脉冲</div>
+          <div class="stage-hint">闪电自云层劈落击中节点 · 拖拽旋转视角 · 点击激起脉冲</div>
         </div>
       </div>
 
@@ -1588,27 +1588,73 @@
       // 5) Shockwaves on Click / City Switch
       const waves = [];
 
-      // 6) Autonomous lightning: bolts travel between district nodes, igniting them gold
+      // 6) Sky lightning: jagged bolts fall from the clouds onto district nodes like a lightning rod strike
       function clearLightnings() {
         lightnings.forEach(L => {
-          mapWireGroup.remove(L.line);
+          root.remove(L.line);
+          root.remove(L.halo);
           root.remove(L.tip);
-          mapWireGroup.remove(L.landRing);
+          root.remove(L.landRing);
+          root.remove(L.flash);
+          (L.branches || []).forEach(b => {
+            root.remove(b);
+            b.geometry.dispose();
+            b.material.dispose();
+          });
           L.line.geometry.dispose();
           L.line.material.dispose();
+          L.halo.geometry.dispose();
+          L.halo.material.dispose();
           L.tip.geometry.dispose();
           L.tip.material.dispose();
           L.landRing.geometry.dispose();
           L.landRing.material.dispose();
+          L.flash.geometry.dispose();
+          L.flash.material.dispose();
         });
         lightnings.length = 0;
       }
 
-      function makeLightning(a, b) {
-        const N = 16;
-        const positions = new Float32Array(N * 3);
+      // Soft radial glow texture (procedural, no external asset)
+      const flashCanvas = document.createElement("canvas");
+      flashCanvas.width = flashCanvas.height = 128;
+      const fc = flashCanvas.getContext("2d");
+      const grad = fc.createRadialGradient(64, 64, 0, 64, 64, 64);
+      grad.addColorStop(0, "rgba(255,244,196,1)");
+      grad.addColorStop(0.22, "rgba(255,196,56,0.85)");
+      grad.addColorStop(0.55, "rgba(255,152,0,0.25)");
+      grad.addColorStop(1, "rgba(255,140,0,0)");
+      fc.fillStyle = grad;
+      fc.fillRect(0, 0, 128, 128);
+      const flashTexture = new THREE.CanvasTexture(flashCanvas);
+
+      function makeSkyLightning(target) {
+        const N = 30;
+        const startY = 3.1 + Math.random() * 0.6;
+        const tx = target.x;
+        const ty = target.h;
+        const tz = target.z;
+
+        // Cloud origin above the node with a random offset
+        const sx = tx + (Math.random() - 0.5) * 1.5;
+        const sz = tz + (Math.random() - 0.5) * 1.5;
+
+        const pts = new Float32Array(N * 3);
+        let bx = sx, bz = sz;
+        for (let i = 0; i < N; i++) {
+          const f = i / (N - 1);
+          bx = sx + (tx - sx) * f + (Math.random() - 0.5) * 0.2 * (1 - f) + (Math.random() - 0.5) * 0.05;
+          bz = sz + (tz - sz) * f + (Math.random() - 0.5) * 0.2 * (1 - f) + (Math.random() - 0.5) * 0.05;
+          const by = startY + (ty - startY) * f;
+          if (i === N - 1) { bx = tx; bz = tz; }
+          pts[i * 3] = bx;
+          pts[i * 3 + 1] = by;
+          pts[i * 3 + 2] = bz;
+        }
+
         const geo = new THREE.BufferGeometry();
-        geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+        geo.setAttribute("position", new THREE.BufferAttribute(pts, 3));
+        geo.setDrawRange(0, 1);
         const line = new THREE.Line(geo, new THREE.LineBasicMaterial({
           color: 0xffffff,
           transparent: true,
@@ -1616,135 +1662,190 @@
           blending: THREE.AdditiveBlending,
           depthWrite: false
         }));
-        mapWireGroup.add(line);
+        root.add(line);
 
-        // Arrow-shaped bolt head (elongated spike, not a round ball)
-        const headGeo = new THREE.ConeGeometry(0.035, 0.17, 4, 1);
-        headGeo.translate(0, 0.085, 0);
+        const halo = new THREE.Line(geo, new THREE.LineBasicMaterial({
+          color: 0x93c5fd,
+          transparent: true,
+          opacity: 0.35,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false
+        }));
+        halo.scale.setScalar(1.001);
+        root.add(halo);
+
+        // A short tapered arrow head at the leading tip of the descending bolt
+        const headGeo = new THREE.ConeGeometry(0.04, 0.22, 4, 1);
+        headGeo.translate(0, 0.11, 0);
         const tip = new THREE.Mesh(headGeo, new THREE.MeshBasicMaterial({
-          color: 0xffb300,
+          color: 0xfff3c4,
           transparent: true,
           opacity: 1,
           blending: THREE.AdditiveBlending
         }));
         root.add(tip);
 
-        const landGeo = new THREE.RingGeometry(0.05, 0.085, 40);
+        const landGeo = new THREE.RingGeometry(0.06, 0.095, 48);
         landGeo.rotateX(-Math.PI / 2);
         const landRing = new THREE.Mesh(landGeo, new THREE.MeshBasicMaterial({
-          color: 0xffb300, transparent: true, opacity: 0, side: THREE.DoubleSide
+          color: 0xffb300, transparent: true, opacity: 0, side: THREE.DoubleSide,
+          blending: THREE.AdditiveBlending, depthWrite: false
         }));
-        landRing.position.set(a.x, 0.018, a.z);
-        mapWireGroup.add(landRing);
+        landRing.position.set(tx, 0.02, tz);
+        root.add(landRing);
+
+        // Impact flash sprite (glow at strike point)
+        const flash = new THREE.Sprite(new THREE.SpriteMaterial({
+          map: flashTexture,
+          color: 0xffffff,
+          transparent: true,
+          opacity: 0,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false
+        }));
+        flash.position.set(tx, ty + 0.02, tz);
+        flash.scale.set(0.6, 0.6, 1);
+        root.add(flash);
 
         lightnings.push({
-          a, b, N, line, geo, tip, landRing,
+          target,
+          N, pts, line, halo, tip, landRing, flash,
+          branches: [],
           landT: -1,
           progress: 0,
-          speed: 2.4 + Math.random() * 0.9,
-          seed: Math.random() * 100,
+          speed: 3.2 + Math.random() * 1.4,
           life: 0,
-          hitFlag: new Array(beacons.length).fill(false)
+          branched: false
         });
       }
 
-      const _v = new THREE.Vector3();
+      function spawnBranch(L) {
+        // Spawn 1–2 short jagged side branches from a mid-bolt point (like real lightning)
+        const N = L.N;
+        const branchCount = 1 + Math.floor(Math.random() * 2);
+        for (let k = 0; k < branchCount; k++) {
+          const idx = Math.floor(N * (0.35 + Math.random() * 0.35));
+          const x0 = L.pts[idx * 3], y0 = L.pts[idx * 3 + 1], z0 = L.pts[idx * 3 + 2];
+          const len = 5 + Math.floor(Math.random() * 4);
+          const dirX = (Math.random() - 0.5) * 0.8;
+          const dirZ = (Math.random() - 0.5) * 0.8;
+          const dirY = -0.5 - Math.random() * 0.4;
+          const bPts = new Float32Array(len * 3);
+          let x = x0, y = y0, z = z0;
+          for (let i = 0; i < len; i++) {
+            const f = i / (len - 1);
+            x = x0 + dirX * f * 0.7 + (Math.random() - 0.5) * 0.09;
+            y = y0 + dirY * f * 0.6;
+            z = z0 + dirZ * f * 0.7 + (Math.random() - 0.5) * 0.09;
+            bPts[i * 3] = x;
+            bPts[i * 3 + 1] = y;
+            bPts[i * 3 + 2] = z;
+          }
+          const bGeo = new THREE.BufferGeometry();
+          bGeo.setAttribute("position", new THREE.BufferAttribute(bPts, 3));
+          const bLine = new THREE.Line(bGeo, new THREE.LineBasicMaterial({
+            color: 0xffffff,
+            transparent: true,
+            opacity: 0.55,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false
+          }));
+          root.add(bLine);
+          L.branches.push(bLine);
+        }
+      }
+
+      const _up = new THREE.Vector3(0, 1, 0);
+      const _dir = new THREE.Vector3();
 
       function updateLightnings(t, dt) {
-        // Spawn a new bolt every 0.55s ~ 1.05s when fewer than 3 are in flight
-        if (beacons.length >= 2 && lightnings.length < 3 && t - lastSpawn > 0.55 + Math.random() * 0.5) {
+        // Spawn a new sky bolt every 0.9s ~ 1.6s when fewer than 2 are in flight
+        if (beacons.length >= 1 && lightnings.length < 2 && t - lastSpawn > 0.9 + Math.random() * 0.7) {
           lastSpawn = t;
-          const ia = Math.floor(Math.random() * beacons.length);
-          let ib = Math.floor(Math.random() * beacons.length);
-          if (ib === ia) ib = (ib + 1 + Math.floor(Math.random() * (beacons.length - 1))) % beacons.length;
-          makeLightning(beacons[ia], beacons[ib]);
+          const target = beacons[Math.floor(Math.random() * beacons.length)];
+          makeSkyLightning(target);
         }
 
         for (let li = lightnings.length - 1; li >= 0; li--) {
           const L = lightnings[li];
-          const { a, b } = L;
-          const ax = a.x, ay = a.h, az = a.z;
-          const bx = b.x, by = b.h, bz = b.z;
-          const dx = bx - ax, dy = by - ay, dz = bz - az;
-          const dist = Math.hypot(dx, dy, dz) || 1e-4;
-          const ux = dx / dist, uy = dy / dist, uz = dz / dist;
-          let px = -uz, py = 0, pz = ux;
-          const pl = Math.hypot(px, py, pz);
-          if (pl < 0.2) { px = 0; py = 0; pz = 1; }
-          else { px /= pl; pz /= pl; }
+          const N = L.N;
 
-          // Completed: full straight bolt visible, fading out
+          // Strike phase: bolt fully visible, flashing & fading out
           if (L.progress >= 1) {
             L.life += dt;
-            const fade = Math.max(0, 0.95 - L.life * 2.5);
-            L.line.material.opacity = fade;
+            // Two-stage flicker: bright flash then dim afterglow
+            const flicker = Math.max(0, Math.sin(L.life * 38)) * 0.6 + 0.4;
+            const fade = Math.max(0, 0.95 - L.life * 2.4);
+            L.line.material.opacity = fade * flicker;
+            L.halo.material.opacity = fade * 0.4 * flicker;
             L.tip.material.opacity = 0;
-            const seg = 1 / (L.N - 1);
-            const arr = L.geo.getAttribute("position").array;
-            for (let i = 0; i < L.N; i++) {
-              const s = i * seg;
-              const qy = 2 * (1 - s) * s;
-              const j = 0.06 * Math.sin(s * Math.PI * 5 + L.seed + t * 32) * qy;
-              arr[i * 3] = ax + dx * s + j * px;
-              arr[i * 3 + 1] = ay + dy * s + j * py;
-              arr[i * 3 + 2] = az + dz * s + j * pz;
-            }
-            L.geo.getAttribute("position").needsUpdate = true;
+            L.flash.material.opacity = Math.max(0, 0.9 - L.life * 2.0);
+            const fs = 0.6 + L.life * 1.6;
+            L.flash.scale.set(fs, fs, 1);
+            (L.branches || []).forEach(b => {
+              b.material.opacity = fade * 0.55 * flicker;
+            });
+
             if (fade <= 0.01) {
-              mapWireGroup.remove(L.line);
+              root.remove(L.line);
+              root.remove(L.halo);
               root.remove(L.tip);
-              mapWireGroup.remove(L.landRing);
+              root.remove(L.landRing);
+              root.remove(L.flash);
+              (L.branches || []).forEach(b => {
+                root.remove(b);
+                b.geometry.dispose();
+                b.material.dispose();
+              });
               L.line.geometry.dispose();
               L.line.material.dispose();
+              L.halo.geometry.dispose();
+              L.halo.material.dispose();
               L.tip.geometry.dispose();
               L.tip.material.dispose();
               L.landRing.geometry.dispose();
               L.landRing.material.dispose();
+              L.flash.geometry.dispose();
+              L.flash.material.dispose();
               lightnings.splice(li, 1);
             }
             continue;
           }
 
-          // Traveling phase: draw the straight bolt up to the flash tip
+          // Descending phase: reveal jagged path from cloud down toward the rod
           L.progress = Math.min(1, L.progress + dt * L.speed);
-          const seg = 1 / (L.N - 1);
-          const maxI = Math.max(2, Math.round(L.progress * (L.N - 1)));
-          const arr = L.geo.getAttribute("position").array;
-          let tipX = ax, tipY = ay, tipZ = az;
-          for (let i = 0; i < L.N; i++) {
-            const s = Math.min(i * seg, L.progress);
-            if (i <= maxI) {
-              const qy = 2 * (1 - s) * s;
-              const j = 0.06 * Math.sin(s * Math.PI * 5 + L.seed + t * 32) * qy;
-              tipX = ax + dx * s + j * px;
-              tipY = ay + dy * s + j * py;
-              tipZ = az + dz * s + j * pz;
-            }
-            arr[i * 3] = tipX;
-            arr[i * 3 + 1] = tipY;
-            arr[i * 3 + 2] = tipZ;
-          }
-          L.geo.getAttribute("position").needsUpdate = true;
+          const count = Math.max(2, Math.round(L.progress * (N - 1)) + 1);
+          L.line.geometry.setDrawRange(0, count);
+          L.halo.geometry.setDrawRange(0, count);
+
+          const ti = count - 1;
+          const tipX = L.pts[ti * 3];
+          const tipY = L.pts[ti * 3 + 1];
+          const tipZ = L.pts[ti * 3 + 2];
           L.tip.position.set(tipX, tipY, tipZ);
-          // Orient the arrow head along the straight flight direction
-          _v.set(ux, uy, uz);
-          L.tip.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), _v);
+          const pi = Math.max(0, ti - 1);
+          _dir.set(
+            tipX - L.pts[pi * 3],
+            tipY - L.pts[pi * 3 + 1],
+            tipZ - L.pts[pi * 3 + 2]
+          );
+          if (_dir.lengthSq() < 1e-8) _dir.set(0, -1, 0);
+          _dir.normalize();
+          L.tip.quaternion.setFromUnitVectors(_up, _dir);
 
-          // The flash ignites every node it crosses
-          for (let ni = 0; ni < beacons.length; ni++) {
-            const nd = beacons[ni];
-            if (L.hitFlag[ni]) continue;
-            if (Math.hypot(nd.x - tipX, nd.z - tipZ) < 0.16 && Math.abs(nd.h - tipY) < 0.4) {
-              L.hitFlag[ni] = true;
-              nd.gold = 1;
-            }
+          // Spawn side branches once the bolt has descended halfway
+          if (!L.branched && L.progress > 0.45) {
+            L.branched = true;
+            spawnBranch(L);
           }
 
-          // Arrival: land ring pulse + destination flash
+          // Impact: lightning-rod strike — flash, gold ignition, ground pulse ring
           if (L.progress >= 1) {
             L.landT = 0;
-            b.gold = 1;
-            L.landRing.position.set(b.x, 0.018, b.z);
+            L.target.gold = 1;
+            L.landRing.position.set(L.target.x, 0.02, L.target.z);
+            L.flash.position.set(L.target.x, L.target.h + 0.02, L.target.z);
+            L.flash.material.opacity = 0.95;
           }
         }
 
@@ -1752,9 +1853,9 @@
         for (const L of lightnings) {
           if (L.landT >= 0) {
             L.landT += dt;
-            const s = 1 + L.landT * 14;
+            const s = 1 + L.landT * 16;
             L.landRing.scale.set(s, 1, s);
-            L.landRing.material.opacity = Math.max(0, 0.8 - L.landT * 1.9);
+            L.landRing.material.opacity = Math.max(0, 0.85 - L.landT * 2.1);
           }
         }
       }
