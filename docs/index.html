@@ -1592,8 +1592,8 @@
       function clearLightnings() {
         lightnings.forEach(L => {
           root.remove(L.line);
+          (L.strokes || []).forEach(s => { root.remove(s); s.material.dispose(); });
           (L.halos || []).forEach(h => { root.remove(h); h.material.dispose(); });
-          root.remove(L.tip);
           root.remove(L.landRing);
           root.remove(L.flash);
           (L.branches || []).forEach(b => {
@@ -1603,8 +1603,6 @@
           });
           L.line.geometry.dispose();
           L.line.material.dispose();
-          L.tip.geometry.dispose();
-          L.tip.material.dispose();
           L.landRing.geometry.dispose();
           L.landRing.material.dispose();
           L.flash.geometry.dispose();
@@ -1662,9 +1660,22 @@
         }));
         root.add(line);
 
-        // Three offset glow passes fake a thicker stroke (WebGL ignores linewidth)
+        // 5 offset passes fake a thick stroke (WebGL ignores linewidth), + 3 glow passes
+        const strokes = [];
+        [[0.02, 0, 0], [-0.014, 0, 0.014], [0.008, 0, -0.019], [0, 0, 0.022], [-0.021, 0, -0.007]].forEach((off) => {
+          const s = new THREE.Line(geo, new THREE.LineBasicMaterial({
+            color: 0xffffff,
+            transparent: true,
+            opacity: 0.82,
+            blending: THREE.AdditiveBlending,
+            depthWrite: false
+          }));
+          s.position.set(off[0], off[1], off[2]);
+          root.add(s);
+          strokes.push(s);
+        });
         const halos = [];
-        [[0.016, 0, 0], [-0.011, 0.01, 0.008], [0, 0, 0.018]].forEach((off) => {
+        [[0.038, 0, 0], [-0.03, 0, 0.026], [0.016, 0, -0.034]].forEach((off) => {
           const halo = new THREE.Line(geo, new THREE.LineBasicMaterial({
             color: 0x93c5fd,
             transparent: true,
@@ -1676,17 +1687,6 @@
           root.add(halo);
           halos.push(halo);
         });
-
-        // A short tapered arrow head at the leading tip of the descending bolt
-        const headGeo = new THREE.ConeGeometry(0.058, 0.32, 4, 1);
-        headGeo.translate(0, 0.16, 0);
-        const tip = new THREE.Mesh(headGeo, new THREE.MeshBasicMaterial({
-          color: 0xfff3c4,
-          transparent: true,
-          opacity: 1,
-          blending: THREE.AdditiveBlending
-        }));
-        root.add(tip);
 
         const landGeo = new THREE.RingGeometry(0.085, 0.13, 48);
         landGeo.rotateX(-Math.PI / 2);
@@ -1712,7 +1712,7 @@
 
         lightnings.push({
           target,
-          N, pts, line, halos, tip, landRing, flash,
+          N, pts, line, strokes, halos, landRing, flash,
           branches: [],
           landT: -1,
           progress: 0,
@@ -1758,9 +1758,6 @@
         }
       }
 
-      const _up = new THREE.Vector3(0, 1, 0);
-      const _dir = new THREE.Vector3();
-
       function updateLightnings(t, dt) {
         // Spawn a new sky bolt every 0.9s ~ 1.6s when fewer than 2 are in flight
         if (beacons.length >= 1 && lightnings.length < 2 && t - lastSpawn > 0.9 + Math.random() * 0.7) {
@@ -1780,8 +1777,8 @@
             const flicker = Math.max(0, Math.sin(L.life * 38)) * 0.6 + 0.4;
             const fade = Math.max(0, 0.95 - L.life * 2.4);
             L.line.material.opacity = fade * flicker;
+            (L.strokes || []).forEach(s => { s.material.opacity = fade * 0.82 * flicker; });
             (L.halos || []).forEach(h => { h.material.opacity = fade * 0.42 * flicker; });
-            L.tip.material.opacity = 0;
             L.flash.material.opacity = Math.max(0, 0.9 - L.life * 2.0);
             const fs = 0.85 + L.life * 2.1;
             L.flash.scale.set(fs, fs, 1);
@@ -1791,8 +1788,8 @@
 
             if (fade <= 0.01) {
               root.remove(L.line);
+              (L.strokes || []).forEach(s => { root.remove(s); s.material.dispose(); });
               (L.halos || []).forEach(h => { root.remove(h); h.material.dispose(); });
-              root.remove(L.tip);
               root.remove(L.landRing);
               root.remove(L.flash);
               (L.branches || []).forEach(b => {
@@ -1802,8 +1799,6 @@
               });
               L.line.geometry.dispose();
               L.line.material.dispose();
-              L.tip.geometry.dispose();
-              L.tip.material.dispose();
               L.landRing.geometry.dispose();
               L.landRing.material.dispose();
               L.flash.geometry.dispose();
@@ -1817,22 +1812,8 @@
           L.progress = Math.min(1, L.progress + dt * L.speed);
           const count = Math.max(2, Math.round(L.progress * (N - 1)) + 1);
           L.line.geometry.setDrawRange(0, count);
+          (L.strokes || []).forEach(s => { s.geometry.setDrawRange(0, count); });
           (L.halos || []).forEach(h => { h.geometry.setDrawRange(0, count); });
-
-          const ti = count - 1;
-          const tipX = L.pts[ti * 3];
-          const tipY = L.pts[ti * 3 + 1];
-          const tipZ = L.pts[ti * 3 + 2];
-          L.tip.position.set(tipX, tipY, tipZ);
-          const pi = Math.max(0, ti - 1);
-          _dir.set(
-            tipX - L.pts[pi * 3],
-            tipY - L.pts[pi * 3 + 1],
-            tipZ - L.pts[pi * 3 + 2]
-          );
-          if (_dir.lengthSq() < 1e-8) _dir.set(0, -1, 0);
-          _dir.normalize();
-          L.tip.quaternion.setFromUnitVectors(_up, _dir);
 
           // Spawn side branches once the bolt has descended halfway
           if (!L.branched && L.progress > 0.45) {
