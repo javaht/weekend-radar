@@ -470,6 +470,34 @@
       border: 1px solid var(--border-hairline);
     }
 
+    /* 3D District Label Layer (projected from city polygon centroids) */
+    .label-layer {
+      position: absolute;
+      inset: 0;
+      overflow: hidden;
+      pointer-events: none;
+      z-index: 3;
+      contain: layout size style;
+    }
+
+    .district-label {
+      position: absolute;
+      top: 0;
+      left: 0;
+      transform: translate(-50%, -50%);
+      font-size: 10.5px;
+      font-weight: 500;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+      color: #f4f4f5;
+      opacity: 0;
+      text-shadow:
+        0 0 10px rgba(0, 0, 0, 0.95),
+        0 1px 3px rgba(0, 0, 0, 0.9),
+        0 0 2px rgba(0, 0, 0, 0.8);
+      will-change: transform, opacity;
+    }
+
     /* Quick Command Bar under Stage */
     .quick-cmd-bar {
       display: inline-flex;
@@ -910,7 +938,6 @@
       <nav class="nav-links">
         <a href="#architecture" data-magnetic>架构设计</a>
         <a href="#studio" data-magnetic>配置生成器</a>
-        <a href="#preview" data-magnetic>双态排版</a>
       </nav>
       <a href="https://github.com/javaht/weekend-radar" target="_blank" rel="noopener" class="nav-cta" data-magnetic>
         <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56 0-.28-.01-1.02-.02-2-3.2.7-3.88-1.54-3.88-1.54-.52-1.33-1.28-1.68-1.28-1.68-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.76 2.7 1.25 3.36.96.1-.75.4-1.25.73-1.54-2.55-.29-5.24-1.28-5.24-5.68 0-1.26.45-2.28 1.18-3.09-.12-.29-.51-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11.05 11.05 0 0 1 5.78 0c2.2-1.49 3.17-1.18 3.17-1.18.62 1.59.23 2.76.11 3.05.74.81 1.18 1.83 1.18 3.09 0 4.41-2.69 5.38-5.25 5.67.41.36.78 1.06.78 2.14 0 1.55-.01 2.79-.01 3.17 0 .31.21.68.8.56A11.51 11.51 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z"/></svg>
@@ -953,6 +980,7 @@
       <!-- THREE.JS TITANIUM MONOCHROME + ACCENT STAGE -->
       <div class="stage-container" id="radar-stage">
         <canvas id="radar-canvas"></canvas>
+        <div class="label-layer" id="district-label-layer"></div>
 
         <div class="stage-hud-top">
           <div class="glass-pill">
@@ -1150,43 +1178,6 @@ bendibao (10-31, "待核实") + bili (10-31~11-01, "¥168-399")
             <button class="btn-pill-copy" id="st-copy-btn" data-magnetic>复制代码</button>
           </div>
           <pre class="term-body" id="st-code-output"></pre>
-        </div>
-      </div>
-    </section>
-
-    <!-- SECTION 03: LIVE PREVIEW -->
-    <section id="preview">
-      <div class="sec-header">
-        <div>
-          <div class="sec-eyebrow"><span class="dot-green"></span>03 / Dual Output</div>
-          <h2 class="sec-title">桌面端全量归档，移动端流式卡片。</h2>
-        </div>
-        <p class="sec-desc">
-          针对移动端聊天窗口不支持宽表格的特性，推送通道自动渲染为带超链接与引用块的卡片流。
-        </p>
-      </div>
-
-      <div class="preview-grid">
-        <div class="bento-card" data-tilt>
-          <div>
-            <div class="card-meta">
-              <span>MOBILE WEBHOOK STREAM</span>
-              <span class="micro-tag"><span class="dot-orange"></span><span id="pv-city-tag">北京</span> · 实时预览</span>
-            </div>
-            <h3 id="pv-card-title" style="margin-bottom:18px">🎯 北京周末活动雷达 · 11-02</h3>
-            <div id="pv-events-list"></div>
-          </div>
-        </div>
-
-        <div class="bento-card" data-tilt>
-          <div>
-            <div class="card-meta">
-              <span>SOURCE HEALTH PROBE</span>
-              <span class="micro-tag"><span class="dot-green"></span>--probe 校准表</span>
-            </div>
-            <h3 style="margin-bottom:18px">逐源连通性与城市专属源自动过滤</h3>
-            <div class="mono-snippet" id="pv-probe-output" style="min-height:240px"></div>
-          </div>
         </div>
       </div>
     </section>
@@ -1422,6 +1413,66 @@ bendibao (10-31, "待核实") + bili (10-31~11-01, "¥168-399")
       let cloudGeo = null;
       let basePos = [];
       const beacons = [];
+      const labelLayer = document.getElementById("district-label-layer");
+      let districtLabels = [];
+
+      function rebuildDistrictLabels(cityName) {
+        labelLayer.innerHTML = "";
+        districtLabels = [];
+        const geoData = (window.CITY_GEO && window.CITY_GEO[cityName]) || (window.CITY_GEO && window.CITY_GEO["北京"]);
+        if (!geoData) return;
+        const items = geoData.labels || [];
+        items.forEach((item) => {
+          const el = document.createElement("span");
+          el.className = "district-label";
+          el.textContent = item.n;
+          labelLayer.appendChild(el);
+          districtLabels.push({
+            el,
+            vec: new THREE.Vector3(item.p[0], 0.045, item.p[1]),
+            area: item.a || 0.05
+          });
+        });
+      }
+
+      function updateDistrictLabels() {
+        if (!districtLabels.length) return;
+        const w = stage.clientWidth;
+        const h = stage.clientHeight;
+        root.updateMatrixWorld(true);
+        for (let i = 0; i < districtLabels.length; i++) {
+          const item = districtLabels[i];
+          const projected = item.vec.clone();
+          root.localToWorld(projected);
+          projected.project(camera);
+          const px = (projected.x * 0.5 + 0.5) * w;
+          const py = (-projected.y * 0.5 + 0.5) * h;
+
+          // Fade based on visible district area
+          const baseAlpha = Math.min(1, item.area * 3.4);
+          let alpha = projected.z > 1 ? 0 : baseAlpha * 0.85;
+
+          // Soft de-clutter for dense central districts
+          if (alpha > 0.03) {
+            for (let j = 0; j < i; j++) {
+              const other = districtLabels[j];
+              if (other._alpha < 0.05) continue;
+              if (Math.abs(px - other._x) < 62 && Math.abs(py - other._y) < 16) {
+                alpha = 0;
+                break;
+              }
+            }
+          }
+
+          item._x = px;
+          item._y = py;
+          item._alpha = alpha;
+          item.el.style.opacity = alpha.toFixed(2);
+          if (alpha > 0.01) {
+            item.el.style.transform = `translate(-50%,-50%) translate(${px.toFixed(1)}px,${py.toFixed(1)}px)`;
+          }
+        }
+      }
 
       // 2D Ray-casting Point-in-Polygon helper
       function pointInRing(x, z, ring) {
@@ -1607,6 +1658,8 @@ bendibao (10-31, "待核实") + bili (10-31~11-01, "¥168-399")
             beacons.push({ x, z, baseH: h, tip, stemMat, flare: 0 });
           }
         }
+
+        rebuildDistrictLabels(cityName);
       }
 
       // 5) Shockwaves on Click / City Switch
@@ -1784,6 +1837,7 @@ bendibao (10-31, "待核实") + bili (10-31~11-01, "¥168-399")
         }
 
         renderer.render(scene, camera);
+        updateDistrictLabels();
       }
       animate();
     })();
@@ -1875,44 +1929,6 @@ ${iniLines}`;
       }
       document.getElementById("st-code-output").textContent = out;
 
-      // Preview
-      document.getElementById("pv-city-tag").textContent = state.city;
-      document.getElementById("pv-card-title").textContent = `🎯 ${state.city}周末活动雷达 · 11-02`;
-      const evs = (c.events && c.events.length) ? c.events : [
-        { name: `${state.city} · 周末 ACG 动漫游戏展`, date: "11-07 ~ 11-08", venue: `${state.city}国际会展中心`, price: "¥75起", tags: "★有实物 ｜ ◆i人友好", dot: "orange" },
-        { name: `${state.city} · 开源技术与 AI 开发者沙龙`, date: "11-08", venue: `${state.city}科技园路演厅`, price: "免费", tags: "★有实物 ｜ B类技术", dot: "blue" }
-      ];
-
-      document.getElementById("pv-events-list").innerHTML = evs.map(ev => `
-        <div class="feed-item">
-          <div class="feed-top">
-            <div class="feed-name">
-              <span class="dot-${ev.dot}"></span>
-              <span>${ev.name}</span>
-            </div>
-            <span class="feed-price">${ev.price}</span>
-          </div>
-          <div class="feed-meta">
-            📅 ${ev.date} &nbsp;·&nbsp; 📍 ${ev.venue}<br/>
-            <span style="color:var(--text-primary)">${ev.tags}</span>
-          </div>
-        </div>
-      `).join("");
-
-      const bjExtra = state.city === "北京"
-        ? `chnmuseum  | on   | ✅ 200 | 国博特展 (4820 字)\ncncc       | on   | ✅ 200 | 国家会议中心 (12 条)`
-        : `chnmuseum  | off  | ⏭ 跳过 | 非北京城市自动关闭北京专属源\ncncc       | off  | ⏭ 跳过 | 非北京城市自动关闭北京专属源`;
-
-      document.getElementById("pv-probe-output").textContent =
-`Target: ${state.city} (adcode=${c.adcode}, damai=${c.damai})
-────────────────────────────────────────────────────
-bili       | on   | ✅ 200 | 17 条 area=${c.adcode}
-cpp        | on   | ✅ 200 | 11 条 city=${c.adcode}
-bendibao   | on   | ✅ 200 | m.${c.bendibao}.bendibao.com
-douban     | on   | ✅ 200 | ${c.douban}.douban.com
-${bjExtra}
-────────────────────────────────────────────────────
-LLM        | ${state.provider} @ ${p.model} → ✅ OK`;
     }
 
     document.querySelectorAll("#hero-city-seg .seg-btn, #st-cities .apple-chip").forEach(btn => {
