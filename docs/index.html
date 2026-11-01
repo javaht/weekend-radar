@@ -1,0 +1,1886 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Weekend Radar — 周末活动雷达</title>
+  <meta name="description" content="多城市线下活动情报与差分引擎。零重型框架 Python 实现，支持 13 城预设、主流 AI Provider 与 7 大 Webhook 交付渠道。" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      /* Monochrome Black / White / Space Gray Palette */
+      --bg-pure: #000000;
+      --bg-elevated: #0a0a0c;
+      --surface-1: rgba(24, 24, 27, 0.56);
+      --surface-2: rgba(39, 39, 42, 0.48);
+      --surface-glass: rgba(18, 18, 20, 0.68);
+      --border-hairline: rgba(255, 255, 255, 0.08);
+      --border-specular: rgba(255, 255, 255, 0.18);
+
+      --text-primary: #fafafa;
+      --text-secondary: #a1a1aa;
+      --text-tertiary: #71717a;
+      --text-muted: #52525b;
+
+      /* Sparse, Jewel-like Micro-Accents (Used < 5% of screen area) */
+      --accent-orange: #ff5500;   /* Apple Ultra Action Orange */
+      --accent-blue: #0a84ff;     /* Apple System Electric Blue */
+      --accent-green: #30d158;    /* Apple System Mint Green */
+      --accent-amber: #ffd60a;    /* Apple System Amber */
+
+      --font-sans: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Switzer", "Inter", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+      --font-mono: "SF Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+      --ease-spring: cubic-bezier(0.22, 1, 0.36, 1);
+      --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html {
+      scroll-behavior: smooth;
+      background-color: var(--bg-pure);
+      color: var(--text-primary);
+      font-family: var(--font-sans);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    body {
+      min-height: 100vh;
+      overflow-x: hidden;
+      background:
+        radial-gradient(ellipse 80% 50% at 50% -15%, rgba(255, 255, 255, 0.07), transparent 70%),
+        var(--bg-pure);
+      selection-background-color: #ffffff;
+      selection-color: #000000;
+    }
+
+    ::selection {
+      background: rgba(255, 255, 255, 0.9);
+      color: #000000;
+    }
+
+    /* Custom Apple iPadOS / VisionOS Magnetic Cursor Halo */
+    .cursor-halo {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.22);
+      pointer-events: none;
+      z-index: 9999;
+      transform: translate3d(-100px, -100px, 0);
+      transition: width 0.28s var(--ease-spring),
+                  height 0.28s var(--ease-spring),
+                  border-radius 0.28s var(--ease-spring),
+                  background 0.25s ease,
+                  border-color 0.25s ease;
+      backdrop-filter: invert(0.06);
+      mix-blend-mode: screen;
+    }
+
+    .cursor-halo.is-active {
+      background: rgba(255, 85, 0, 0.18);
+      border-color: rgba(255, 85, 0, 0.65);
+    }
+
+    .cursor-dot {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: #ffffff;
+      pointer-events: none;
+      z-index: 10000;
+      transform: translate3d(-100px, -100px, 0);
+      transition: transform 0.06s linear, background 0.2s ease, opacity 0.2s ease;
+    }
+
+    @media (hover: none) and (pointer: coarse) {
+      .cursor-halo, .cursor-dot { display: none; }
+    }
+
+    /* Click Touch Ripple */
+    .touch-ripple {
+      position: fixed;
+      border-radius: 50%;
+      pointer-events: none;
+      z-index: 9998;
+      border: 1px solid rgba(255, 255, 255, 0.45);
+      background: radial-gradient(circle, rgba(255,255,255,0.12) 0%, transparent 70%);
+      transform: translate(-50%, -50%) scale(0.1);
+      animation: ripple-burst 0.75s var(--ease-out) forwards;
+    }
+
+    @keyframes ripple-burst {
+      0% { transform: translate(-50%, -50%) scale(0.15); opacity: 0.9; }
+      100% { transform: translate(-50%, -50%) scale(2.6); opacity: 0; }
+    }
+
+    /* Floating Apple-style Frosted Glass Navbar */
+    .nav-wrapper {
+      position: fixed;
+      top: 18px;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      display: flex;
+      justify-content: center;
+      padding: 0 20px;
+      pointer-events: none;
+    }
+
+    header.nav {
+      pointer-events: auto;
+      height: 48px;
+      padding: 0 8px 0 18px;
+      border-radius: 999px;
+      background: var(--surface-glass);
+      backdrop-filter: saturate(180%) blur(24px);
+      -webkit-backdrop-filter: saturate(180%) blur(24px);
+      border: 1px solid var(--border-hairline);
+      box-shadow:
+        inset 0 1px 0 0 rgba(255, 255, 255, 0.14),
+        0 12px 32px -8px rgba(0, 0, 0, 0.65);
+      display: flex;
+      align-items: center;
+      gap: 28px;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      color: var(--text-primary);
+      font-weight: 600;
+      font-size: 13.5px;
+      letter-spacing: -0.01em;
+    }
+
+    .brand-pulse {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--accent-orange);
+      box-shadow: 0 0 10px var(--accent-orange);
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 22px;
+    }
+
+    .nav-links a {
+      color: var(--text-secondary);
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 400;
+      transition: color 0.2s ease;
+    }
+
+    .nav-links a:hover {
+      color: var(--text-primary);
+    }
+
+    .nav-cta {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      height: 32px;
+      padding: 0 14px;
+      border-radius: 999px;
+      background: #fafafa;
+      color: #09090b !important;
+      font-size: 12.5px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: transform 0.2s var(--ease-spring), background 0.2s ease;
+    }
+
+    .nav-cta:hover {
+      background: #ffffff;
+      transform: scale(1.03);
+    }
+
+    /* Container */
+    main {
+      max-width: 1220px;
+      margin: 0 auto;
+      padding: 0 28px;
+    }
+
+    /* Hero Section */
+    .hero {
+      padding-top: 118px;
+      padding-bottom: 72px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+    }
+
+    .hero-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 14px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border-hairline);
+      box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
+      font-size: 12px;
+      color: var(--text-secondary);
+      margin-bottom: 26px;
+      letter-spacing: 0.01em;
+    }
+
+    .hero-badge .dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent-orange);
+    }
+
+    .hero-badge strong {
+      color: var(--text-primary);
+      font-weight: 500;
+    }
+
+    .hero h1 {
+      font-size: clamp(40px, 6vw, 72px);
+      font-weight: 700;
+      line-height: 1.06;
+      letter-spacing: -0.038em;
+      max-width: 900px;
+      margin-bottom: 22px;
+      background: linear-gradient(180deg, #ffffff 0%, #ffffff 45%, #8e8e98 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .hero-sub {
+      font-size: clamp(16px, 1.6vw, 19px);
+      line-height: 1.65;
+      color: var(--text-secondary);
+      max-width: 650px;
+      font-weight: 400;
+      margin-bottom: 34px;
+    }
+
+    .hero-sub em {
+      font-style: normal;
+      color: var(--text-primary);
+    }
+
+    /* Apple-style Segmented City Switcher */
+    .segmented-wrap {
+      display: inline-flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 4px;
+      padding: 5px;
+      border-radius: 999px;
+      background: rgba(24, 24, 27, 0.78);
+      border: 1px solid var(--border-hairline);
+      box-shadow: inset 0 1px 2px rgba(0, 0, 0, 0.6);
+      margin-bottom: 32px;
+    }
+
+    .seg-btn {
+      cursor: pointer;
+      border: none;
+      background: transparent;
+      color: var(--text-secondary);
+      padding: 7px 16px;
+      border-radius: 999px;
+      font-size: 13px;
+      font-weight: 500;
+      font-family: var(--font-sans);
+      transition: all 0.28s var(--ease-spring);
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .seg-btn .code-tag {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      opacity: 0.55;
+    }
+
+    .seg-btn:hover {
+      color: var(--text-primary);
+    }
+
+    .seg-btn.active {
+      background: #fafafa;
+      color: #09090b;
+      box-shadow: 0 2px 10px rgba(0, 0, 0, 0.4);
+    }
+
+    .seg-btn.active .code-tag {
+      opacity: 0.7;
+      color: var(--accent-orange);
+      font-weight: 600;
+    }
+
+    /* Interactive Three.js Stage Showcase Card */
+    .stage-container {
+      width: 100%;
+      height: 520px;
+      border-radius: 28px;
+      position: relative;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 50% 45%, rgba(39, 39, 42, 0.38) 0%, rgba(9, 9, 11, 0.95) 75%);
+      border: 1px solid var(--border-hairline);
+      box-shadow:
+        inset 0 1px 0 0 var(--border-specular),
+        0 40px 90px -20px rgba(0, 0, 0, 0.85);
+      margin-bottom: 28px;
+    }
+
+    #radar-canvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      cursor: crosshair;
+    }
+
+    /* Minimalist Apple HUD Pills inside Stage */
+    .stage-hud-top {
+      position: absolute;
+      top: 22px;
+      left: 24px;
+      right: 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      pointer-events: none;
+      z-index: 4;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .glass-pill {
+      padding: 10px 16px;
+      border-radius: 16px;
+      background: rgba(12, 12, 14, 0.65);
+      backdrop-filter: saturate(180%) blur(20px);
+      -webkit-backdrop-filter: saturate(180%) blur(20px);
+      border: 1px solid var(--border-hairline);
+      box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
+      text-align: left;
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      line-height: 1.6;
+      color: var(--text-secondary);
+    }
+
+    .glass-pill .k {
+      color: var(--text-tertiary);
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .glass-pill .v {
+      color: var(--text-primary);
+      font-weight: 500;
+    }
+
+    .dot-orange {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent-orange);
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+
+    .dot-blue {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent-blue);
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+
+    .dot-green {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--accent-green);
+      margin-right: 6px;
+      vertical-align: middle;
+    }
+
+    .stage-hud-bottom {
+      position: absolute;
+      bottom: 20px;
+      left: 24px;
+      right: 24px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      pointer-events: none;
+      z-index: 4;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .legend-bar {
+      display: inline-flex;
+      align-items: center;
+      gap: 18px;
+      padding: 8px 16px;
+      border-radius: 999px;
+      background: rgba(12, 12, 14, 0.65);
+      backdrop-filter: blur(16px);
+      border: 1px solid var(--border-hairline);
+      font-size: 12px;
+      color: var(--text-secondary);
+    }
+
+    .stage-hint {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-tertiary);
+      padding: 6px 12px;
+      border-radius: 999px;
+      background: rgba(12, 12, 14, 0.55);
+      border: 1px solid var(--border-hairline);
+    }
+
+    /* Quick Command Bar under Stage */
+    .quick-cmd-bar {
+      display: inline-flex;
+      align-items: center;
+      gap: 16px;
+      padding: 10px 12px 10px 20px;
+      border-radius: 999px;
+      background: var(--surface-1);
+      border: 1px solid var(--border-hairline);
+      box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.1);
+      font-family: var(--font-mono);
+      font-size: 13px;
+      color: var(--text-secondary);
+      max-width: 100%;
+    }
+
+    .quick-cmd-bar code {
+      color: var(--text-primary);
+      white-space: nowrap;
+      overflow-x: auto;
+    }
+
+    .quick-cmd-bar .hl {
+      color: var(--accent-orange);
+    }
+
+    .btn-pill-copy {
+      cursor: pointer;
+      border: 1px solid var(--border-hairline);
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text-primary);
+      padding: 6px 14px;
+      border-radius: 999px;
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      font-weight: 500;
+      transition: all 0.2s var(--ease-spring);
+    }
+
+    .btn-pill-copy:hover {
+      background: #fafafa;
+      color: #09090b;
+    }
+
+    /* Section Layout */
+    section {
+      padding: 96px 0;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+    }
+
+    .sec-header {
+      margin-bottom: 52px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 24px;
+      flex-wrap: wrap;
+    }
+
+    .sec-eyebrow {
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--text-tertiary);
+      margin-bottom: 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .sec-title {
+      font-size: clamp(28px, 3.6vw, 42px);
+      font-weight: 700;
+      letter-spacing: -0.03em;
+      line-height: 1.15;
+      background: linear-gradient(180deg, #ffffff 0%, #a1a1aa 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .sec-desc {
+      color: var(--text-secondary);
+      font-size: 15px;
+      line-height: 1.65;
+      max-width: 460px;
+    }
+
+    /* Apple Bento Grid with Mouse Spotlight & 3D Tilt */
+    .bento-grid {
+      display: grid;
+      grid-template-columns: repeat(12, 1fr);
+      gap: 20px;
+    }
+
+    .bento-card {
+      --mouse-x: 50%;
+      --mouse-y: 50%;
+      position: relative;
+      border-radius: 24px;
+      background: var(--surface-1);
+      border: 1px solid var(--border-hairline);
+      padding: 32px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      gap: 22px;
+      box-shadow:
+        inset 0 1px 0 0 rgba(255, 255, 255, 0.12),
+        0 20px 40px -20px rgba(0, 0, 0, 0.7);
+      transition: transform 0.35s var(--ease-out), border-color 0.3s ease;
+      transform-style: preserve-3d;
+      will-change: transform;
+    }
+
+    /* Cursor-tracking Specular Spotlight inside each Bento Card */
+    .bento-card::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      border-radius: 24px;
+      background: radial-gradient(
+        520px circle at var(--mouse-x) var(--mouse-y),
+        rgba(255, 255, 255, 0.085),
+        transparent 45%
+      );
+      opacity: 0;
+      transition: opacity 0.35s ease;
+      pointer-events: none;
+    }
+
+    .bento-card:hover::before {
+      opacity: 1;
+    }
+
+    .bento-card:hover {
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    .span-7 { grid-column: span 7; }
+    .span-5 { grid-column: span 5; }
+    .span-6 { grid-column: span 6; }
+
+    .card-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-tertiary);
+    }
+
+    .micro-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      color: var(--text-secondary);
+      font-size: 11px;
+    }
+
+    .bento-card h3 {
+      font-size: 21px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      color: var(--text-primary);
+      margin-top: 10px;
+      margin-bottom: 10px;
+    }
+
+    .bento-card p {
+      font-size: 14.5px;
+      line-height: 1.7;
+      color: var(--text-secondary);
+    }
+
+    .mono-snippet {
+      padding: 16px 18px;
+      border-radius: 16px;
+      background: rgba(0, 0, 0, 0.65);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      font-family: var(--font-mono);
+      font-size: 12px;
+      line-height: 1.7;
+      color: #d4d4d8;
+      overflow-x: auto;
+    }
+
+    .mono-snippet .m-comment { color: #52525b; }
+    .mono-snippet .m-white { color: #fafafa; font-weight: 500; }
+    .mono-snippet .m-orange { color: var(--accent-orange); }
+    .mono-snippet .m-blue { color: var(--accent-blue); }
+    .mono-snippet .m-green { color: var(--accent-green); }
+
+    /* Interactive Config Studio */
+    .studio-grid {
+      display: grid;
+      grid-template-columns: 1fr 1.15fr;
+      gap: 24px;
+      align-items: stretch;
+    }
+
+    .studio-controls {
+      padding: 32px;
+      border-radius: 24px;
+      background: var(--surface-1);
+      border: 1px solid var(--border-hairline);
+      box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.12);
+      display: flex;
+      flex-direction: column;
+      gap: 26px;
+    }
+
+    .ctrl-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 12px;
+      font-family: var(--font-mono);
+      color: var(--text-secondary);
+      margin-bottom: 12px;
+    }
+
+    .ctrl-chips {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .apple-chip {
+      cursor: pointer;
+      padding: 7px 14px;
+      border-radius: 999px;
+      border: 1px solid var(--border-hairline);
+      background: rgba(255, 255, 255, 0.03);
+      color: var(--text-secondary);
+      font-size: 12.5px;
+      font-weight: 500;
+      font-family: var(--font-sans);
+      transition: all 0.22s var(--ease-spring);
+    }
+
+    .apple-chip:hover {
+      border-color: rgba(255, 255, 255, 0.24);
+      color: var(--text-primary);
+      transform: translateY(-1px);
+    }
+
+    .apple-chip.selected {
+      background: #fafafa;
+      color: #09090b;
+      border-color: #fafafa;
+      box-shadow: 0 4px 14px rgba(255, 255, 255, 0.14);
+    }
+
+    .studio-terminal {
+      border-radius: 24px;
+      background: #070709;
+      border: 1px solid var(--border-hairline);
+      box-shadow:
+        inset 0 1px 0 0 rgba(255, 255, 255, 0.12),
+        0 24px 48px -18px rgba(0, 0, 0, 0.8);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .term-bar {
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--border-hairline);
+      background: rgba(255, 255, 255, 0.02);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .traffic-lights {
+      display: flex;
+      gap: 7px;
+      align-items: center;
+    }
+
+    .traffic-lights span {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+      background: #27272a;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+    }
+
+    .traffic-lights span:nth-child(1) { background: #3f3f46; }
+    .traffic-lights span:nth-child(2) { background: #52525b; }
+    .traffic-lights span:nth-child(3) { background: var(--accent-orange); border: none; }
+
+    .term-tabs {
+      display: flex;
+      gap: 4px;
+      padding: 3px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border-hairline);
+    }
+
+    .term-tab {
+      cursor: pointer;
+      border: none;
+      background: transparent;
+      color: var(--text-tertiary);
+      padding: 4px 12px;
+      border-radius: 999px;
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      transition: all 0.2s ease;
+    }
+
+    .term-tab.active {
+      background: rgba(255, 255, 255, 0.12);
+      color: var(--text-primary);
+    }
+
+    .term-body {
+      padding: 24px;
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      line-height: 1.75;
+      color: #e4e4e7;
+      white-space: pre;
+      overflow-x: auto;
+      flex: 1;
+    }
+
+    /* Dual Preview Showcase */
+    .preview-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 20px;
+    }
+
+    .feed-item {
+      padding: 16px 18px;
+      border-radius: 16px;
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      margin-bottom: 12px;
+      transition: background 0.2s ease, border-color 0.2s ease;
+    }
+
+    .feed-item:last-child {
+      margin-bottom: 0;
+    }
+
+    .feed-item:hover {
+      background: rgba(255, 255, 255, 0.055);
+      border-color: rgba(255, 255, 255, 0.14);
+    }
+
+    .feed-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 8px;
+    }
+
+    .feed-name {
+      font-size: 14.5px;
+      font-weight: 600;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .feed-price {
+      font-family: var(--font-mono);
+      font-size: 12px;
+      color: var(--text-primary);
+      padding: 2px 8px;
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.07);
+    }
+
+    .feed-meta {
+      font-size: 12.5px;
+      color: var(--text-secondary);
+      line-height: 1.6;
+    }
+
+    /* Footer */
+    footer {
+      padding: 48px 0 64px;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+      font-size: 12.5px;
+      color: var(--text-tertiary);
+    }
+
+    footer a {
+      color: var(--text-secondary);
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+
+    footer a:hover {
+      color: var(--text-primary);
+    }
+
+    @media (max-width: 960px) {
+      .span-7, .span-5, .span-6 { grid-column: span 12; }
+      .studio-grid, .preview-grid { grid-template-columns: 1fr; }
+      .stage-container { height: 420px; }
+      .nav-links { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Magnetic Cursor & Dot -->
+  <div class="cursor-halo" id="cursor-halo"></div>
+  <div class="cursor-dot" id="cursor-dot"></div>
+
+  <!-- Apple Floating Glass Header -->
+  <div class="nav-wrapper">
+    <header class="nav">
+      <a href="#" class="brand" data-magnetic>
+        <span class="brand-pulse"></span>
+        <span>Weekend Radar</span>
+      </a>
+      <nav class="nav-links">
+        <a href="#architecture" data-magnetic>架构设计</a>
+        <a href="#studio" data-magnetic>配置生成器</a>
+        <a href="#preview" data-magnetic>双态排版</a>
+      </nav>
+      <a href="https://github.com/javaht/weekend-radar" target="_blank" rel="noopener" class="nav-cta" data-magnetic>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .5C5.65.5.5 5.65.5 12c0 5.08 3.29 9.39 7.86 10.91.58.11.79-.25.79-.56 0-.28-.01-1.02-.02-2-3.2.7-3.88-1.54-3.88-1.54-.52-1.33-1.28-1.68-1.28-1.68-1.05-.71.08-.7.08-.7 1.16.08 1.77 1.19 1.77 1.19 1.03 1.76 2.7 1.25 3.36.96.1-.75.4-1.25.73-1.54-2.55-.29-5.24-1.28-5.24-5.68 0-1.26.45-2.28 1.18-3.09-.12-.29-.51-1.46.11-3.05 0 0 .97-.31 3.17 1.18a11.05 11.05 0 0 1 5.78 0c2.2-1.49 3.17-1.18 3.17-1.18.62 1.59.23 2.76.11 3.05.74.81 1.18 1.83 1.18 3.09 0 4.41-2.69 5.38-5.25 5.67.41.36.78 1.06.78 2.14 0 1.55-.01 2.79-.01 3.17 0 .31.21.68.8.56A11.51 11.51 0 0 0 23.5 12C23.5 5.65 18.35.5 12 .5Z"/></svg>
+        GitHub
+      </a>
+    </header>
+  </div>
+
+  <main>
+    <!-- HERO -->
+    <div class="hero">
+      <div class="hero-badge">
+        <span class="dot"></span>
+        <span>Open Source · <strong>13 Cities</strong> · <strong>9 AI Providers</strong> · <strong>7 Webhooks</strong></span>
+      </div>
+
+      <h1>周末活动雷达。<br/>静默采集，只在变化时发声。</h1>
+
+      <p class="hero-sub">
+        以确定性 JSON 接口锚定精确票价，以 LLM 消化异构网页，用 SQLite 连续两轮差分滤除转述抖动。<em>零重型框架</em>，为你盯紧整座城市的漫展、特展、开源沙龙与大型博览会。
+      </p>
+
+      <!-- Apple Segmented Control for Target City -->
+      <div class="segmented-wrap" id="hero-city-seg">
+        <button class="seg-btn active" data-city="北京" data-magnetic>北京 <span class="code-tag">110000</span></button>
+        <button class="seg-btn" data-city="上海" data-magnetic>上海 <span class="code-tag">310000</span></button>
+        <button class="seg-btn" data-city="广州" data-magnetic>广州 <span class="code-tag">440100</span></button>
+        <button class="seg-btn" data-city="深圳" data-magnetic>深圳 <span class="code-tag">440300</span></button>
+        <button class="seg-btn" data-city="杭州" data-magnetic>杭州 <span class="code-tag">330100</span></button>
+        <button class="seg-btn" data-city="成都" data-magnetic>成都 <span class="code-tag">510100</span></button>
+        <button class="seg-btn" data-city="武汉" data-magnetic>武汉 <span class="code-tag">420100</span></button>
+        <button class="seg-btn" data-city="南京" data-magnetic>南京 <span class="code-tag">320100</span></button>
+      </div>
+
+      <!-- THREE.JS TITANIUM MONOCHROME + ACCENT STAGE -->
+      <div class="stage-container" id="radar-stage">
+        <canvas id="radar-canvas"></canvas>
+
+        <div class="stage-hud-top">
+          <div class="glass-pill">
+            <div class="k">Target Lock</div>
+            <div><span class="dot-orange"></span><span class="v" id="hud-city">北京 · BEIJING</span></div>
+            <div><span class="v" id="hud-coords" style="color:var(--text-secondary)">39.9042° N, 116.4074° E</span></div>
+          </div>
+
+          <div class="glass-pill" style="text-align:right">
+            <div class="k">Telemetry</div>
+            <div>ADCODE <span class="v" id="hud-adcode">110000</span> · DAMAI <span class="v" id="hud-damai">101010100</span></div>
+            <div><span class="dot-green"></span><span class="v" id="hud-nodes">28 Active Signals</span> · Confirm ×2</div>
+          </div>
+        </div>
+
+        <div class="stage-hud-bottom">
+          <div class="legend-bar">
+            <span><i class="dot-orange"></i>焦点新增 / 临近截止</span>
+            <span><i class="dot-blue"></i>技术沙龙 / 开源聚会</span>
+            <span><i class="dot-green"></i>常驻特展 / 漫展市集</span>
+          </div>
+          <div class="stage-hint">触控或划过水面激起脉冲 · 拖拽旋转视角</div>
+        </div>
+      </div>
+
+      <!-- Quick Copy CLI Pill -->
+      <div class="quick-cmd-bar">
+        <code id="hero-cmd-text">$ python3 run.py <span class="hl">--city</span> 北京 <span class="hl">--provider</span> deepseek <span class="hl">--channel</span> feishu <span class="hl">--run</span></code>
+        <button class="btn-pill-copy" id="hero-copy-btn" data-magnetic>复制命令</button>
+      </div>
+    </div>
+
+    <!-- SECTION 01: ARCHITECTURE BENTO GRID -->
+    <section id="architecture">
+      <div class="sec-header">
+        <div>
+          <div class="sec-eyebrow"><span class="dot-orange"></span>01 / Engineering Discipline</div>
+          <h2 class="sec-title">克制的技术选型，严苛的数据纪律。</h2>
+        </div>
+        <p class="sec-desc">
+          全身仅依赖一个 <code>requests</code> 库，拒绝为了十几个接口引入 Chromium 或庞大爬虫框架。四项核心机制全部来自真实运行踩坑。
+        </p>
+      </div>
+
+      <div class="bento-grid">
+        <div class="bento-card span-7" data-tilt>
+          <div>
+            <div class="card-meta">
+              <span>HYBRID EXTRACTION</span>
+              <span class="micro-tag"><span class="dot-blue"></span>H / J 双轨制</span>
+            </div>
+            <h3>精确字段归代码，异构网页归模型</h3>
+            <p>
+              给 18 个资讯站各写一套 CSS 选择器，等于背上 18 份随时会坏的技术债；而让大模型转述 JSON 接口里的价格，则会把 <code>¥88</code> 编造成 <code>¥80</code>。因此项目将源严格二分：B站会员购、CPP、大麦走 <strong>J 类结构化直映</strong>（分/元换算零误差），豆瓣、本地宝走 <strong>H 类全文抽取</strong>。
+            </p>
+          </div>
+          <div class="mono-snippet">
+<span class="m-comment"># 加一个平台 = config.ini 加一行 + 跑 --probe 校准，零代码改动</span>
+bili     = <span class="m-blue">J</span>|<span class="m-green">on</span> |https://show.bilibili.com/api/ticket/project/listV2
+cpp      = <span class="m-blue">J</span>|<span class="m-green">on</span> |https://www.allcpp.cn/allcpp/event/eventMainListV2.do
+bendibao = <span class="m-orange">H</span>|<span class="m-green">on</span> |https://m.{bendibao_city}.bendibao.com/xiuxian/</div>
+        </div>
+
+        <div class="bento-card span-5" data-tilt>
+          <div>
+            <div class="card-meta">
+              <span>ANTI-JITTER FINGERPRINT</span>
+              <span class="micro-tag"><span class="dot-orange"></span>confirm_runs = 2</span>
+            </div>
+            <h3>最低价锚点 + 连续两轮确认</h3>
+            <p>
+              LLM 每轮转述同一场活动，票价写法与抽取条数都会轻微波动。若按原串对比，同日跑两次会误报 14 条改价。现在指纹只取<strong>最低票价数字</strong>与<strong>场馆归一前缀</strong>，且变更连续 2 轮成立才触发推送。
+            </p>
+          </div>
+          <div class="mono-snippet">
+price_anchor(<span class="m-white">"¥80(预售)¥90(现场)"</span>)
+<span class="m-comment"># → 归一为 "80.00"，与 "¥80-158" 指纹完全一致</span></div>
+        </div>
+
+        <div class="bento-card span-5" data-tilt>
+          <div>
+            <div class="card-meta">
+              <span>FAIL-LOUD TELEMETRY</span>
+              <span class="micro-tag"><span class="dot-green"></span>显式健康度</span>
+            </div>
+            <h3>「无变化」与「没抓到」绝不混淆</h3>
+            <p>
+              全部源成功且无变化 → 安静退出；任一源失败 → <strong>必推健康告警</strong>，绝不把站点限流伪装成“今天没活动”。且只有确定性源（<code>stable_sources</code>）连续缺席才判定取消。
+            </p>
+          </div>
+          <div class="mono-snippet">
+all_ok &amp;&amp; no_diff  → <span class="m-comment">Silent (0 push)</span>
+!all_ok            → <span class="m-orange">Health Alert Push</span></div>
+        </div>
+
+        <div class="bento-card span-7" data-tilt>
+          <div>
+            <div class="card-meta">
+              <span>CROSS-SOURCE ARBITRATION</span>
+              <span class="micro-tag"><span class="dot-blue"></span>跨源质量裁决</span>
+            </div>
+            <h3>自动合并单日票档与多日展期，择优保留官方直链</h3>
+            <p>
+              当同一场漫展同时被本地宝（模糊票价、单日）与 B 站会员购（精确票价、两日展期）抓到时，合并器自动扩展为最大包容日期区间，按 <code>购票平台直链 &gt; 场馆官网 &gt; 聚合媒体</code> 覆盖 URL，并在场馆实质冲突时自动标注「待核实」。
+            </p>
+          </div>
+          <div class="mono-snippet">
+bendibao (10-31, "待核实") + bili (10-31~11-01, "¥168-399")
+<span class="m-comment"># → 合并结果: 10-31~11-01 | ¥168-399 | show.bilibili.com</span></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 02: INTERACTIVE STUDIO -->
+    <section id="studio">
+      <div class="sec-header">
+        <div>
+          <div class="sec-eyebrow"><span class="dot-blue"></span>02 / Configuration Studio</div>
+          <h2 class="sec-title">点选即生成，开箱即部署。</h2>
+        </div>
+        <p class="sec-desc">
+          内置 13 座城市行政区划与子域名预设、9 家主流大模型服务商及 7 种即时通讯轻量 Webhook 模板。
+        </p>
+      </div>
+
+      <div class="studio-grid">
+        <div class="studio-controls">
+          <div>
+            <div class="ctrl-head">
+              <span>TARGET CITY / 目标城市</span>
+              <span id="st-city-meta" style="color:var(--text-primary)">北京 · 110000</span>
+            </div>
+            <div class="ctrl-chips" id="st-cities">
+              <button class="apple-chip selected" data-city="北京" data-magnetic>北京</button>
+              <button class="apple-chip" data-city="上海" data-magnetic>上海</button>
+              <button class="apple-chip" data-city="广州" data-magnetic>广州</button>
+              <button class="apple-chip" data-city="深圳" data-magnetic>深圳</button>
+              <button class="apple-chip" data-city="杭州" data-magnetic>杭州</button>
+              <button class="apple-chip" data-city="成都" data-magnetic>成都</button>
+              <button class="apple-chip" data-city="武汉" data-magnetic>武汉</button>
+              <button class="apple-chip" data-city="南京" data-magnetic>南京</button>
+              <button class="apple-chip" data-city="西安" data-magnetic>西安</button>
+              <button class="apple-chip" data-city="重庆" data-magnetic>重庆</button>
+              <button class="apple-chip" data-city="苏州" data-magnetic>苏州</button>
+              <button class="apple-chip" data-city="天津" data-magnetic>天津</button>
+              <button class="apple-chip" data-city="长沙" data-magnetic>长沙</button>
+            </div>
+          </div>
+
+          <div>
+            <div class="ctrl-head">
+              <span>AI PROVIDER / 模型服务商</span>
+              <span id="st-prov-meta" style="color:var(--accent-blue)">deepseek-chat</span>
+            </div>
+            <div class="ctrl-chips" id="st-providers">
+              <button class="apple-chip selected" data-provider="deepseek" data-magnetic>DeepSeek</button>
+              <button class="apple-chip" data-provider="openai" data-magnetic>OpenAI</button>
+              <button class="apple-chip" data-provider="anthropic" data-magnetic>Anthropic</button>
+              <button class="apple-chip" data-provider="siliconflow" data-magnetic>SiliconFlow</button>
+              <button class="apple-chip" data-provider="openrouter" data-magnetic>OpenRouter</button>
+              <button class="apple-chip" data-provider="dashscope" data-magnetic>阿里百炼</button>
+              <button class="apple-chip" data-provider="zhipu" data-magnetic>智谱 GLM</button>
+              <button class="apple-chip" data-provider="ollama" data-magnetic>Ollama</button>
+              <button class="apple-chip" data-provider="magic" data-magnetic>Magic 网关</button>
+            </div>
+          </div>
+
+          <div>
+            <div class="ctrl-head">
+              <span>WEBHOOK CHANNELS / 推送渠道（可多选）</span>
+              <span id="st-ch-meta" style="color:var(--accent-orange)">feishu</span>
+            </div>
+            <div class="ctrl-chips" id="st-channels">
+              <button class="apple-chip selected" data-channel="feishu" data-magnetic>飞书</button>
+              <button class="apple-chip" data-channel="wecom" data-magnetic>企业微信</button>
+              <button class="apple-chip" data-channel="dingtalk" data-magnetic>钉钉</button>
+              <button class="apple-chip" data-channel="bark" data-magnetic>Bark</button>
+              <button class="apple-chip" data-channel="telegram" data-magnetic>Telegram</button>
+              <button class="apple-chip" data-channel="serverchan" data-magnetic>Server酱</button>
+              <button class="apple-chip" data-channel="pushdeer" data-magnetic>PushDeer</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="studio-terminal">
+          <div class="term-bar">
+            <div class="traffic-lights">
+              <span></span><span></span><span></span>
+            </div>
+            <div class="term-tabs">
+              <button class="term-tab active" data-tab="docker" data-magnetic>Docker</button>
+              <button class="term-tab" data-tab="cli" data-magnetic>CLI</button>
+              <button class="term-tab" data-tab="ini" data-magnetic>config.ini</button>
+            </div>
+            <button class="btn-pill-copy" id="st-copy-btn" data-magnetic>复制代码</button>
+          </div>
+          <pre class="term-body" id="st-code-output"></pre>
+        </div>
+      </div>
+    </section>
+
+    <!-- SECTION 03: LIVE PREVIEW -->
+    <section id="preview">
+      <div class="sec-header">
+        <div>
+          <div class="sec-eyebrow"><span class="dot-green"></span>03 / Dual Output</div>
+          <h2 class="sec-title">桌面端全量归档，移动端流式卡片。</h2>
+        </div>
+        <p class="sec-desc">
+          针对移动端聊天窗口不支持宽表格的特性，推送通道自动渲染为带超链接与引用块的卡片流。
+        </p>
+      </div>
+
+      <div class="preview-grid">
+        <div class="bento-card" data-tilt>
+          <div>
+            <div class="card-meta">
+              <span>MOBILE WEBHOOK STREAM</span>
+              <span class="micro-tag"><span class="dot-orange"></span><span id="pv-city-tag">北京</span> · 实时预览</span>
+            </div>
+            <h3 id="pv-card-title" style="margin-bottom:18px">🎯 北京周末活动雷达 · 11-02</h3>
+            <div id="pv-events-list"></div>
+          </div>
+        </div>
+
+        <div class="bento-card" data-tilt>
+          <div>
+            <div class="card-meta">
+              <span>SOURCE HEALTH PROBE</span>
+              <span class="micro-tag"><span class="dot-green"></span>--probe 校准表</span>
+            </div>
+            <h3 style="margin-bottom:18px">逐源连通性与城市专属源自动过滤</h3>
+            <div class="mono-snippet" id="pv-probe-output" style="min-height:240px"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <footer>
+      <div>Weekend Radar · Designed with precision · MIT License</div>
+      <div>
+        <a href="https://github.com/javaht/weekend-radar" target="_blank" rel="noopener">github.com/javaht/weekend-radar</a>
+      </div>
+    </footer>
+  </main>
+
+  <script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+  <script>
+    // =========================================================================
+    // 1. DATA & PRESETS
+    // =========================================================================
+    const CITY_DATA = {
+      "北京": {
+        en: "BEIJING", lat: 39.9042, lon: 116.4074, adcode: "110000", damai: "101010100",
+        bendibao: "bj", douban: "beijing", nodes: 28,
+        events: [
+          { name: "第三届赤马 EDC Showcase 动漫展", date: "11-07 ~ 11-08", venue: "北京首钢国际会展中心 1号馆", price: "¥168-399", tags: "★有实物 ｜ ◆i人友好", dot: "orange" },
+          { name: "中国国家博物馆 · 古代科技文物特展", date: "11-07 ~ 11-30", venue: "中国国家博物馆 北3展厅", price: "免费预约", tags: "◆i人友好 ｜ 官方特展", dot: "green" },
+          { name: "OpenAtom 开源开发者周北京沙龙", date: "11-08", venue: "中关村创业大街 3W", price: "免费", tags: "🔄 变更：地址 望京SOHO → 中关村创业大街", dot: "blue" }
+        ]
+      },
+      "上海": {
+        en: "SHANGHAI", lat: 31.2304, lon: 121.4737, adcode: "310000", damai: "101020100",
+        bendibao: "sh", douban: "shanghai", nodes: 34,
+        events: [
+          { name: "COMICUP 同人创作交流展 (上海站)", date: "11-07 ~ 11-08", venue: "国家会展中心(上海)", price: "¥98-168", tags: "★有实物 ｜ ◆i人友好", dot: "orange" },
+          { name: "上海博物馆东馆 · 江南造物特展", date: "11-01 ~ 11-30", venue: "上海博物馆东馆", price: "免费", tags: "◆i人友好 ｜ 持续展出", dot: "green" },
+          { name: "Indienova 独立游戏开发者周末试玩会", date: "11-08", venue: "上海世博展览馆 H2", price: "¥68起", tags: "★有实物(试玩集章) ｜ ◆i人友好", dot: "blue" }
+        ]
+      },
+      "广州": {
+        en: "GUANGZHOU", lat: 23.1291, lon: 113.2644, adcode: "440100", damai: "101280100",
+        bendibao: "gz", douban: "guangzhou", nodes: 22,
+        events: [
+          { name: "萤火虫动漫游戏嘉年华 · 秋季特展", date: "11-07 ~ 11-08", venue: "保利世贸博览馆 1-4号馆", price: "¥75-128", tags: "★有实物 ｜ ◆i人友好", dot: "orange" },
+          { name: "广交会展馆 · 华南数字创客博览会", date: "11-06 ~ 11-08", venue: "中国进出口商品交易会展馆", price: "官网预登记", tags: "★周末场 ｜ B2B博览会", dot: "blue" }
+        ]
+      },
+      "深圳": {
+        en: "SHENZHEN", lat: 22.5431, lon: 114.0579, adcode: "440300", damai: "101280600",
+        bendibao: "sz", douban: "shenzhen", nodes: 25,
+        events: [
+          { name: "深圳国际电玩节 & 潮玩艺术市集", date: "11-07 ~ 11-08", venue: "深圳国际会展中心(宝安)", price: "¥80起", tags: "★有实物 ｜ ◆i人友好", dot: "orange" },
+          { name: "AI Agent & Rust 系统工程深圳 Meetup", date: "11-07", venue: "南山科技园 讯美广场", price: "免费", tags: "⏰ 剩 2 天截止 ｜ ★有实物", dot: "blue" }
+        ]
+      },
+      "杭州": { en: "HANGZHOU", lat: 30.2741, lon: 120.1551, adcode: "330100", damai: "101210100", bendibao: "hz", douban: "hangzhou", nodes: 19, events: [] },
+      "成都": { en: "CHENGDU", lat: 30.5728, lon: 104.0668, adcode: "510100", damai: "101270100", bendibao: "cd", douban: "chengdu", nodes: 21, events: [] },
+      "武汉": { en: "WUHAN", lat: 30.5928, lon: 114.3055, adcode: "420100", damai: "101200100", bendibao: "wh", douban: "wuhan", nodes: 16, events: [] },
+      "南京": { en: "NANJING", lat: 32.0603, lon: 118.7969, adcode: "320100", damai: "101190100", bendibao: "nj", douban: "nanjing", nodes: 17, events: [] },
+      "西安": { en: "XI'AN", lat: 34.3416, lon: 108.9398, adcode: "610100", damai: "101110100", bendibao: "xa", douban: "xian", nodes: 15, events: [] },
+      "重庆": { en: "CHONGQING", lat: 29.5630, lon: 106.5516, adcode: "500000", damai: "101040100", bendibao: "cq", douban: "chongqing", nodes: 18, events: [] },
+      "苏州": { en: "SUZHOU", lat: 31.2989, lon: 120.5853, adcode: "320500", damai: "101190400", bendibao: "suzhou", douban: "suzhou", nodes: 14, events: [] },
+      "天津": { en: "TIANJIN", lat: 39.0842, lon: 117.2010, adcode: "120000", damai: "101030100", bendibao: "tj", douban: "tianjin", nodes: 13, events: [] },
+      "长沙": { en: "CHANGSHA", lat: 28.2282, lon: 112.9388, adcode: "430100", damai: "101250100", bendibao: "cs", douban: "changsha", nodes: 15, events: [] }
+    };
+
+    const PROVIDER_INFO = {
+      deepseek:    { model: "deepseek-chat",             env: "DEEPSEEK_API_KEY",    url: "https://api.deepseek.com/v1" },
+      openai:      { model: "gpt-4o-mini",               env: "OPENAI_API_KEY",      url: "https://api.openai.com/v1" },
+      anthropic:   { model: "claude-3-5-haiku-latest",   env: "ANTHROPIC_API_KEY",   url: "https://api.anthropic.com/v1" },
+      siliconflow: { model: "deepseek-ai/DeepSeek-V3",   env: "SILICONFLOW_API_KEY", url: "https://api.siliconflow.cn/v1" },
+      openrouter:  { model: "deepseek/deepseek-chat",    env: "OPENROUTER_API_KEY",  url: "https://openrouter.ai/api/v1" },
+      dashscope:   { model: "qwen-plus",                 env: "DASHSCOPE_API_KEY",   url: "https://dashscope.aliyuncs.com/compatible-mode/v1" },
+      zhipu:       { model: "glm-4-flash",               env: "ZHIPU_API_KEY",       url: "https://open.bigmodel.cn/api/paas/v4" },
+      ollama:      { model: "qwen2.5:7b",                env: "",                    url: "http://127.0.0.1:11434/v1" },
+      magic:       { model: "group/deepseek-v4-1-flash", env: "",                    url: "http://127.0.0.1:3425" }
+    };
+
+    const CHANNEL_ENV = {
+      feishu:     { env: "RADAR_FEISHU_WEBHOOK=https://open.feishu.cn/open-apis/bot/v2/hook/xxx", ini: "feishu_webhook = https://open.feishu.cn/open-apis/bot/v2/hook/xxx" },
+      wecom:      { env: "RADAR_WECOM_KEY=your_wecom_key", ini: "wecom_key = your_wecom_key" },
+      dingtalk:   { env: "RADAR_DINGTALK_WEBHOOK=https://oapi.dingtalk.com/robot/send?access_token=xxx", ini: "dingtalk_webhook = https://oapi.dingtalk.com/robot/send?access_token=xxx" },
+      bark:       { env: "RADAR_BARK_KEY=your_bark_key", ini: "bark_key = your_bark_key" },
+      telegram:   { env: "RADAR_TELEGRAM_BOT_TOKEN=123:ABC -e RADAR_TELEGRAM_CHAT_ID=999", ini: "telegram_bot_token = 123:ABC\ntelegram_chat_id   = 999" },
+      serverchan: { env: "RADAR_SERVERCHAN_SENDKEY=SCTxxxxx", ini: "serverchan_sendkey = SCTxxxxx" },
+      pushdeer:   { env: "RADAR_PUSH_KEY=PDUxxxxx", ini: "pushkey = PDUxxxxx" }
+    };
+
+    const state = {
+      city: "北京",
+      provider: "deepseek",
+      channels: ["feishu"],
+      tab: "docker"
+    };
+
+    // =========================================================================
+    // 2. MAGNETIC CURSOR, TOUCH RIPPLE & BENTO 3D TILT + SPOTLIGHT
+    // =========================================================================
+    (function initMicroInteractions() {
+      const halo = document.getElementById("cursor-halo");
+      const dot = document.getElementById("cursor-dot");
+      let mouseX = -100, mouseY = -100;
+      let haloX = -100, haloY = -100;
+      let hoveredEl = null;
+
+      window.addEventListener("pointermove", (e) => {
+        mouseX = e.clientX;
+        mouseY = e.clientY;
+        dot.style.transform = `translate3d(${mouseX - 2.5}px, ${mouseY - 2.5}px, 0)`;
+      });
+
+      // Touch / click ripple wave
+      window.addEventListener("pointerdown", (e) => {
+        halo.classList.add("is-active");
+        const ripple = document.createElement("div");
+        ripple.className = "touch-ripple";
+        ripple.style.width = "36px";
+        ripple.style.height = "36px";
+        ripple.style.left = `${e.clientX}px`;
+        ripple.style.top = `${e.clientY}px`;
+        document.body.appendChild(ripple);
+        setTimeout(() => ripple.remove(), 750);
+      });
+
+      window.addEventListener("pointerup", () => {
+        halo.classList.remove("is-active");
+      });
+
+      // Magnetic hover elements
+      document.querySelectorAll("[data-magnetic]").forEach((el) => {
+        el.addEventListener("pointerenter", () => {
+          hoveredEl = el;
+          const rect = el.getBoundingClientRect();
+          halo.style.width = `${rect.width + 10}px`;
+          halo.style.height = `${rect.height + 8}px`;
+          halo.style.borderRadius = getComputedStyle(el).borderRadius || "999px";
+          halo.style.background = "rgba(255, 255, 255, 0.06)";
+          halo.style.borderColor = "rgba(255, 255, 255, 0.28)";
+          dot.style.opacity = "0";
+        });
+        el.addEventListener("pointerleave", () => {
+          hoveredEl = null;
+          halo.style.width = "28px";
+          halo.style.height = "28px";
+          halo.style.borderRadius = "50%";
+          halo.style.background = "rgba(255, 255, 255, 0.08)";
+          halo.style.borderColor = "rgba(255, 255, 255, 0.22)";
+          dot.style.opacity = "1";
+          el.style.transform = "";
+        });
+        el.addEventListener("pointermove", (e) => {
+          const rect = el.getBoundingClientRect();
+          const dx = (e.clientX - (rect.left + rect.width / 2)) * 0.16;
+          const dy = (e.clientY - (rect.top + rect.height / 2)) * 0.16;
+          el.style.transform = `translate3d(${dx}px, ${dy}px, 0)`;
+        });
+      });
+
+      function tickCursor() {
+        requestAnimationFrame(tickCursor);
+        if (hoveredEl) {
+          const rect = hoveredEl.getBoundingClientRect();
+          const tx = rect.left + rect.width / 2 - (rect.width + 10) / 2;
+          const ty = rect.top + rect.height / 2 - (rect.height + 8) / 2;
+          haloX += (tx - haloX) * 0.28;
+          haloY += (ty - haloY) * 0.28;
+        } else {
+          haloX += (mouseX - 14 - haloX) * 0.22;
+          haloY += (mouseY - 14 - haloY) * 0.22;
+        }
+        halo.style.transform = `translate3d(${haloX}px, ${haloY}px, 0)`;
+      }
+      tickCursor();
+
+      // Bento Card Specular Spotlight + Subtle 3D Tilt
+      document.querySelectorAll("[data-tilt]").forEach((card) => {
+        card.addEventListener("pointermove", (e) => {
+          const rect = card.getBoundingClientRect();
+          const x = e.clientX - rect.left;
+          const y = e.clientY - rect.top;
+          card.style.setProperty("--mouse-x", `${x}px`);
+          card.style.setProperty("--mouse-y", `${y}px`);
+          const rx = ((y / rect.height) - 0.5) * -3.2;
+          const ry = ((x / rect.width) - 0.5) * 3.2;
+          card.style.transform = `perspective(900px) rotateX(${rx}deg) rotateY(${ry}deg) translateY(-2px)`;
+        });
+        card.addEventListener("pointerleave", () => {
+          card.style.transform = "";
+        });
+      });
+    })();
+
+    // =========================================================================
+    // 3. THREE.JS TITANIUM MONOCHROME + INTERACTIVE TOUCH ACOUSTIC RADAR
+    // =========================================================================
+    let emitThreeShockwave = () => {};
+    let switchThreeCity = () => {};
+
+    (function initThreeStage() {
+      const canvas = document.getElementById("radar-canvas");
+      const stage = document.getElementById("radar-stage");
+      if (!canvas || typeof THREE === "undefined") return;
+
+      const scene = new THREE.Scene();
+      scene.fog = new THREE.FogExp2(0x050507, 0.09);
+
+      const camera = new THREE.PerspectiveCamera(38, stage.clientWidth / stage.clientHeight, 0.1, 100);
+      camera.position.set(0, 4.1, 5.5);
+      camera.lookAt(0, -0.1, 0);
+
+      const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.setSize(stage.clientWidth, stage.clientHeight);
+
+      const root = new THREE.Group();
+      scene.add(root);
+
+      const radius = 2.85;
+
+      // 1) Monochrome Titanium Hairline Rings
+      [0.7, 1.4, 2.1, radius].forEach((r, idx) => {
+        const pts = [];
+        for (let i = 0; i <= 160; i++) {
+          const a = (i / 160) * Math.PI * 2;
+          pts.push(new THREE.Vector3(Math.cos(a) * r, 0, Math.sin(a) * r));
+        }
+        const geo = new THREE.BufferGeometry().setFromPoints(pts);
+        const mat = new THREE.LineBasicMaterial({
+          color: idx === 3 ? 0xe4e4e7 : 0x71717a,
+          transparent: true,
+          opacity: idx === 3 ? 0.35 : 0.16
+        });
+        root.add(new THREE.Line(geo, mat));
+      });
+
+      // Fine degree tick marks on outer ring
+      const tickPts = [];
+      for (let i = 0; i < 72; i++) {
+        const a = (i / 72) * Math.PI * 2;
+        const inner = i % 6 === 0 ? radius - 0.12 : radius - 0.05;
+        tickPts.push(
+          new THREE.Vector3(Math.cos(a) * inner, 0, Math.sin(a) * inner),
+          new THREE.Vector3(Math.cos(a) * radius, 0, Math.sin(a) * radius)
+        );
+      }
+      const tickGeo = new THREE.BufferGeometry().setFromPoints(tickPts);
+      root.add(new THREE.LineSegments(tickGeo, new THREE.LineBasicMaterial({
+        color: 0xa1a1aa,
+        transparent: true,
+        opacity: 0.3
+      })));
+
+      // 2) Interactive Silver-White Acoustic Particle Field (deforms under cursor!)
+      const gridN = 36;
+      const posArr = [];
+      const basePos = [];
+      for (let gx = -gridN; gx <= gridN; gx++) {
+        for (let gz = -gridN; gz <= gridN; gz++) {
+          const x = (gx / gridN) * radius;
+          const z = (gz / gridN) * radius;
+          const d = Math.hypot(x, z);
+          if (d <= radius * 0.985) {
+            posArr.push(x, 0, z);
+            basePos.push({ x, z, d });
+          }
+        }
+      }
+      const cloudGeo = new THREE.BufferGeometry();
+      cloudGeo.setAttribute("position", new THREE.Float32BufferAttribute(posArr, 3));
+      const cloudMat = new THREE.PointsMaterial({
+        color: 0xf4f4f5,
+        size: 0.024,
+        transparent: true,
+        opacity: 0.52
+      });
+      const cloud = new THREE.Points(cloudGeo, cloudMat);
+      root.add(cloud);
+
+      // 3) Subtle Silver Radar Sweep Beam
+      const sweepGeo = new THREE.BufferGeometry();
+      const segs = 32;
+      const arc = Math.PI * 0.28;
+      const sPos = [];
+      const sCol = [];
+      for (let i = 0; i < segs; i++) {
+        const a1 = (i / segs) * arc;
+        const a2 = ((i + 1) / segs) * arc;
+        const w1 = Math.pow(1 - i / segs, 2.0) * 0.22;
+        const w2 = Math.pow(1 - (i + 1) / segs, 2.0) * 0.22;
+        sPos.push(
+          0, 0.01, 0,
+          Math.cos(a1) * radius, 0.01, Math.sin(a1) * radius,
+          Math.cos(a2) * radius, 0.01, Math.sin(a2) * radius
+        );
+        sCol.push(1, 1, 1, w1, 1, 1, 1, w1, 1, 1, 1, w2);
+      }
+      sweepGeo.setAttribute("position", new THREE.Float32BufferAttribute(sPos, 3));
+      sweepGeo.setAttribute("color", new THREE.Float32BufferAttribute(sCol, 4));
+      const sweepMesh = new THREE.Mesh(sweepGeo, new THREE.MeshBasicMaterial({
+        vertexColors: true,
+        transparent: true,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+      }));
+      const leadLine = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0, 0.015, 0), new THREE.Vector3(radius, 0.015, 0)]),
+        new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.75 })
+      );
+      sweepMesh.add(leadLine);
+      root.add(sweepMesh);
+
+      // 4) Sparse, Jewel-Like Signal Beacons (White/Silver + a few Action Orange / Blue / Green accents)
+      const beaconGroup = new THREE.Group();
+      root.add(beaconGroup);
+      const beacons = [];
+
+      function buildCityBeacons(cityName) {
+        while (beaconGroup.children.length) beaconGroup.remove(beaconGroup.children[0]);
+        beacons.length = 0;
+        const info = CITY_DATA[cityName] || CITY_DATA["北京"];
+        let seed = parseInt(info.adcode || "110000", 10);
+        const rand = () => {
+          seed = (seed * 1664525 + 1013904223) % 4294967296;
+          return seed / 4294967296;
+        };
+
+        const count = info.nodes || 24;
+        for (let i = 0; i < count; i++) {
+          const r = 0.28 + Math.sqrt(rand()) * (radius * 0.84);
+          const theta = rand() * Math.PI * 2;
+          const x = Math.cos(theta) * r;
+          const z = Math.sin(theta) * r;
+          const h = 0.14 + rand() * 0.48;
+
+          // 70% crisp monochrome white/silver, 30% jewel accent (Orange / Blue / Green)
+          let color = 0xe4e4e7;
+          if (i < 3) color = 0xff5500;       // Action Orange focal events
+          else if (i < 6) color = 0x0a84ff;  // Electric Blue tech events
+          else if (i < 9) color = 0x30d158;  // Mint Green free exhibitions
+
+          const stemMat = new THREE.LineBasicMaterial({ color, transparent: true, opacity: i < 9 ? 0.65 : 0.3 });
+          const stem = new THREE.Line(
+            new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(x, 0, z), new THREE.Vector3(x, h, z)]),
+            stemMat
+          );
+          beaconGroup.add(stem);
+
+          const tipGeo = new THREE.SphereGeometry(i < 3 ? 0.045 : 0.03, 14, 14);
+          const tipMat = new THREE.MeshBasicMaterial({ color });
+          const tip = new THREE.Mesh(tipGeo, tipMat);
+          tip.position.set(x, h, z);
+          beaconGroup.add(tip);
+
+          beacons.push({
+            x, z, baseH: h,
+            theta: (theta + Math.PI * 2) % (Math.PI * 2),
+            tip, stem, stemMat, flare: 0
+          });
+        }
+      }
+
+      // 5) Shockwaves on Click / City Switch
+      const waves = [];
+      emitThreeShockwave = function (wx = 0, wz = 0, hex = 0xffffff) {
+        const rGeo = new THREE.RingGeometry(0.04, 0.075, 72);
+        rGeo.rotateX(-Math.PI / 2);
+        const rMat = new THREE.MeshBasicMaterial({
+          color: hex,
+          transparent: true,
+          opacity: 0.85,
+          side: THREE.DoubleSide
+        });
+        const mesh = new THREE.Mesh(rGeo, rMat);
+        mesh.position.set(wx, 0.02, wz);
+        root.add(mesh);
+        waves.push({ mesh, mat: rMat, s: 1, x: wx, z: wz, radius: 0.06 });
+      };
+
+      let targetRotY = 0;
+      let targetRotX = 0.05;
+      switchThreeCity = function (cityName) {
+        buildCityBeacons(cityName);
+        emitThreeShockwave(0, 0, 0xff5500);
+        targetRotY += 0.35;
+      };
+
+      buildCityBeacons("北京");
+
+      // Raycaster for direct 3D mouse-touch water/ferrofluid depression on the plane
+      const raycaster = new THREE.Raycaster();
+      const pointerNDC = new THREE.Vector2(99, 99);
+      const hitPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+      const hitPoint = new THREE.Vector3(99, 0, 99);
+      const localHit = new THREE.Vector3(99, 0, 99);
+
+      let dragging = false;
+      let lastX = 0, lastY = 0;
+
+      stage.addEventListener("pointermove", (e) => {
+        const rect = stage.getBoundingClientRect();
+        pointerNDC.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+        pointerNDC.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+
+        if (dragging) {
+          targetRotY += (e.clientX - lastX) * 0.007;
+          targetRotX = Math.max(-0.4, Math.min(0.5, targetRotX + (e.clientY - lastY) * 0.005));
+          lastX = e.clientX;
+          lastY = e.clientY;
+        }
+      });
+
+      stage.addEventListener("pointerleave", () => {
+        pointerNDC.set(99, 99);
+      });
+
+      stage.addEventListener("pointerdown", (e) => {
+        dragging = true;
+        lastX = e.clientX;
+        lastY = e.clientY;
+        if (localHit.length() <= radius) {
+          emitThreeShockwave(localHit.x, localHit.z, 0xff5500);
+        } else {
+          emitThreeShockwave(0, 0, 0xffffff);
+        }
+      });
+
+      window.addEventListener("pointerup", () => { dragging = false; });
+
+      window.addEventListener("resize", () => {
+        camera.aspect = stage.clientWidth / stage.clientHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(stage.clientWidth, stage.clientHeight);
+      });
+
+      const clock = new THREE.Clock();
+      function animate() {
+        requestAnimationFrame(animate);
+        const dt = clock.getDelta();
+        const t = clock.getElapsedTime();
+
+        sweepMesh.rotation.y -= dt * 0.95;
+        const beamAngle = ((-sweepMesh.rotation.y) % (Math.PI * 2) + Math.PI * 2) % (Math.PI * 2);
+
+        root.rotation.y += (targetRotY - root.rotation.y) * 0.07;
+        root.rotation.x += (targetRotX - root.rotation.x) * 0.07;
+
+        // Compute 3D cursor intersection on the radar plane
+        if (pointerNDC.x < 10) {
+          raycaster.setFromCamera(pointerNDC, camera);
+          if (raycaster.ray.intersectPlane(hitPlane, hitPoint)) {
+            localHit.copy(hitPoint);
+            root.worldToLocal(localHit);
+          }
+        } else {
+          localHit.set(99, 0, 99);
+        }
+
+        // Deform particle field: gentle breathing wave + tactile cursor magnetic ripple
+        const pos = cloudGeo.getAttribute("position");
+        for (let i = 0; i < basePos.length; i++) {
+          const bp = basePos[i];
+          let y = Math.sin(bp.d * 2.8 - t * 1.8) * 0.032;
+
+          // Cursor touch magnetic elevation
+          const distCursor = Math.hypot(bp.x - localHit.x, bp.z - localHit.z);
+          if (distCursor < 0.85) {
+            const factor = Math.cos((distCursor / 0.85) * (Math.PI / 2));
+            y += factor * factor * 0.22;
+          }
+
+          // Shockwave ring displacement
+          for (let w = 0; w < waves.length; w++) {
+            const dWave = Math.abs(Math.hypot(bp.x - waves[w].x, bp.z - waves[w].z) - waves[w].radius);
+            if (dWave < 0.22) {
+              y += (1 - dWave / 0.22) * 0.12 * waves[w].mat.opacity;
+            }
+          }
+
+          pos.setY(i, y);
+        }
+        pos.needsUpdate = true;
+
+        // Beacon illumination when swept or touched
+        for (let i = 0; i < beacons.length; i++) {
+          const b = beacons[i];
+          const angleDiff = Math.abs(beamAngle - b.theta);
+          const nearCursor = Math.hypot(b.x - localHit.x, b.z - localHit.z) < 0.55;
+          if (angleDiff < 0.1 || angleDiff > Math.PI * 2 - 0.1 || nearCursor) {
+            b.flare = 1.0;
+          } else {
+            b.flare = Math.max(0, b.flare - dt * 1.1);
+          }
+          const scale = 1 + b.flare * 0.75;
+          b.tip.scale.set(scale, scale, scale);
+          b.tip.position.y = b.baseH + b.flare * 0.06;
+        }
+
+        // Update expanding shockwaves
+        for (let i = waves.length - 1; i >= 0; i--) {
+          const w = waves[i];
+          w.s += dt * 22;
+          w.radius = 0.05 * w.s;
+          w.mesh.scale.set(w.s, w.s, 1);
+          w.mat.opacity = Math.max(0, 0.85 - w.s / 38);
+          if (w.mat.opacity <= 0.01) {
+            root.remove(w.mesh);
+            w.mesh.geometry.dispose();
+            w.mat.dispose();
+            waves.splice(i, 1);
+          }
+        }
+
+        renderer.render(scene, camera);
+      }
+      animate();
+    })();
+
+    // =========================================================================
+    // 4. UI SYNCHRONIZATION
+    // =========================================================================
+    function syncUI() {
+      const c = CITY_DATA[state.city] || CITY_DATA["北京"];
+      const p = PROVIDER_INFO[state.provider] || PROVIDER_INFO.deepseek;
+      const chStr = state.channels.join(",");
+
+      document.querySelectorAll("#hero-city-seg .seg-btn").forEach(b => {
+        b.classList.toggle("active", b.dataset.city === state.city);
+      });
+      document.querySelectorAll("#st-cities .apple-chip").forEach(b => {
+        b.classList.toggle("selected", b.dataset.city === state.city);
+      });
+      document.querySelectorAll("#st-providers .apple-chip").forEach(b => {
+        b.classList.toggle("selected", b.dataset.provider === state.provider);
+      });
+      document.querySelectorAll("#st-channels .apple-chip").forEach(b => {
+        b.classList.toggle("selected", state.channels.includes(b.dataset.channel));
+      });
+
+      document.getElementById("hud-city").textContent = `${state.city} · ${c.en}`;
+      document.getElementById("hud-coords").textContent = `${c.lat.toFixed(4)}° N, ${c.lon.toFixed(4)}° E`;
+      document.getElementById("hud-adcode").textContent = c.adcode;
+      document.getElementById("hud-damai").textContent = c.damai;
+      document.getElementById("hud-nodes").textContent = `${c.nodes} Active Signals`;
+
+      document.getElementById("hero-cmd-text").innerHTML =
+        `$ python3 run.py <span class="hl">--city</span> ${state.city} <span class="hl">--provider</span> ${state.provider} <span class="hl">--channel</span> ${chStr} <span class="hl">--run</span>`;
+
+      document.getElementById("st-city-meta").textContent = `${state.city} · ${c.adcode}`;
+      document.getElementById("st-prov-meta").textContent = p.model;
+      document.getElementById("st-ch-meta").textContent = chStr;
+
+      const envLines = state.channels.map(ch => `  -e ${CHANNEL_ENV[ch].env} \\`).join("\n");
+      const iniLines = state.channels.map(ch => CHANNEL_ENV[ch].ini).join("\n");
+      const keyLine = p.env ? `  -e ${p.env}=sk-your-key \\\n` : "";
+
+      let out = "";
+      if (state.tab === "docker") {
+        out =
+`# 1. 构建镜像
+docker build -t weekend-radar .
+
+# 2. 运行容器（${state.city} · ${state.provider} · 推送至 ${chStr}）
+docker run --rm \\
+  -v $(pwd)/data:/app/data \\
+  -e RADAR_CITY=${state.city} \\
+  -e RADAR_LLM_PROVIDER=${state.provider} \\
+${keyLine}  -e RADAR_PUSH_CHANNEL=${chStr} \\
+${envLines}
+  weekend-radar --run`;
+      } else if (state.tab === "cli") {
+        const exp = p.env ? `export ${p.env}="sk-your-key"\n` : "";
+        out =
+`# 1. 探测数据源健康度与模型协议
+${exp}python3 run.py --city ${state.city} --provider ${state.provider} --probe
+
+# 2. 只读试跑（不写库、不推送）
+python3 run.py --city ${state.city} --provider ${state.provider} --plan
+
+# 3. 正式运行并按需推送
+python3 run.py --city ${state.city} --provider ${state.provider} --channel ${chStr} --run`;
+      } else {
+        out =
+`[radar]
+city = ${state.city}
+window_days = 30
+confirm_runs = 2
+
+[llm]
+provider = ${state.provider}
+base_url = ${p.url}
+model    = ${p.model}
+
+[extra]
+bili_area  = ${c.adcode}
+cpp_city   = ${c.adcode}
+damai_city = ${c.damai}
+
+[push]
+enabled = true
+channel = ${chStr}
+${iniLines}`;
+      }
+      document.getElementById("st-code-output").textContent = out;
+
+      // Preview
+      document.getElementById("pv-city-tag").textContent = state.city;
+      document.getElementById("pv-card-title").textContent = `🎯 ${state.city}周末活动雷达 · 11-02`;
+      const evs = (c.events && c.events.length) ? c.events : [
+        { name: `${state.city} · 周末 ACG 动漫游戏展`, date: "11-07 ~ 11-08", venue: `${state.city}国际会展中心`, price: "¥75起", tags: "★有实物 ｜ ◆i人友好", dot: "orange" },
+        { name: `${state.city} · 开源技术与 AI 开发者沙龙`, date: "11-08", venue: `${state.city}科技园路演厅`, price: "免费", tags: "★有实物 ｜ B类技术", dot: "blue" }
+      ];
+
+      document.getElementById("pv-events-list").innerHTML = evs.map(ev => `
+        <div class="feed-item">
+          <div class="feed-top">
+            <div class="feed-name">
+              <span class="dot-${ev.dot}"></span>
+              <span>${ev.name}</span>
+            </div>
+            <span class="feed-price">${ev.price}</span>
+          </div>
+          <div class="feed-meta">
+            📅 ${ev.date} &nbsp;·&nbsp; 📍 ${ev.venue}<br/>
+            <span style="color:var(--text-primary)">${ev.tags}</span>
+          </div>
+        </div>
+      `).join("");
+
+      const bjExtra = state.city === "北京"
+        ? `chnmuseum  | on   | ✅ 200 | 国博特展 (4820 字)\ncncc       | on   | ✅ 200 | 国家会议中心 (12 条)`
+        : `chnmuseum  | off  | ⏭ 跳过 | 非北京城市自动关闭北京专属源\ncncc       | off  | ⏭ 跳过 | 非北京城市自动关闭北京专属源`;
+
+      document.getElementById("pv-probe-output").textContent =
+`Target: ${state.city} (adcode=${c.adcode}, damai=${c.damai})
+────────────────────────────────────────────────────
+bili       | on   | ✅ 200 | 17 条 area=${c.adcode}
+cpp        | on   | ✅ 200 | 11 条 city=${c.adcode}
+bendibao   | on   | ✅ 200 | m.${c.bendibao}.bendibao.com
+douban     | on   | ✅ 200 | ${c.douban}.douban.com
+${bjExtra}
+────────────────────────────────────────────────────
+LLM        | ${state.provider} @ ${p.model} → ✅ OK`;
+    }
+
+    document.querySelectorAll("#hero-city-seg .seg-btn, #st-cities .apple-chip").forEach(btn => {
+      btn.addEventListener("click", () => {
+        state.city = btn.dataset.city;
+        switchThreeCity(state.city);
+        syncUI();
+      });
+    });
+
+    document.querySelectorAll("#st-providers .apple-chip").forEach(btn => {
+      btn.addEventListener("click", () => {
+        state.provider = btn.dataset.provider;
+        emitThreeShockwave(0, 0, 0x0a84ff);
+        syncUI();
+      });
+    });
+
+    document.querySelectorAll("#st-channels .apple-chip").forEach(btn => {
+      btn.addEventListener("click", () => {
+        const ch = btn.dataset.channel;
+        if (state.channels.includes(ch)) {
+          if (state.channels.length > 1) state.channels = state.channels.filter(x => x !== ch);
+        } else {
+          state.channels.push(ch);
+        }
+        emitThreeShockwave(0, 0, 0xff5500);
+        syncUI();
+      });
+    });
+
+    document.querySelectorAll(".term-tab").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".term-tab").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        state.tab = btn.dataset.tab;
+        syncUI();
+      });
+    });
+
+    function setupCopy(btnId, textFn) {
+      const btn = document.getElementById(btnId);
+      btn.addEventListener("click", () => {
+        navigator.clipboard.writeText(textFn()).then(() => {
+          const prev = btn.textContent;
+          btn.textContent = "已复制 ✓";
+          setTimeout(() => { btn.textContent = prev; }, 1400);
+        });
+      });
+    }
+
+    setupCopy("hero-copy-btn", () =>
+      `python3 run.py --city ${state.city} --provider ${state.provider} --channel ${state.channels.join(",")} --run`
+    );
+    setupCopy("st-copy-btn", () =>
+      document.getElementById("st-code-output").textContent
+    );
+
+    syncUI();
+  </script>
+</body>
+</html>
