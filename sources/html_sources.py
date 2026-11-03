@@ -8,6 +8,7 @@
 090expo 特殊: 每月一篇排期文章, 文章 ID 随月份变, 所以先发现再抓取。
 """
 import re
+from html import unescape as _unescape
 
 from sources.base import SourceResult, coerce_event
 from core.timerange import parse_date
@@ -16,7 +17,7 @@ from core.timerange import parse_date
 _SCRIPT_RE = re.compile(r"(?is)<(script|style|noscript|svg)[^>]*>.*?</\1>")
 _BR_RE = re.compile(r"(?i)<\s*(br|/p|/div|/tr|/li|/h\d)[^>]*>")
 _TAG_RE = re.compile(r"(?s)<[^>]+>")
-_WS_RE = re.compile(r"[ \t\u3000]+")
+_WS_RE = re.compile(r"[ \t\u3000\xa0]+")
 _MULTI_NL = re.compile(r"\n{3,}")
 
 
@@ -26,8 +27,7 @@ def html_to_text(html):
     s = _SCRIPT_RE.sub(" ", html)
     s = _BR_RE.sub("\n", s)
     s = _TAG_RE.sub(" ", s)
-    s = s.replace("&nbsp;", " ").replace("&amp;", "&").replace("&lt;", "<") \
-         .replace("&gt;", ">").replace("&quot;", '"').replace("&#39;", "'")
+    s = _unescape(s)   # 覆盖全部实体(含 &#x...;); &nbsp; 解出的 \xa0 由 _WS_RE 吃掉
     s = _WS_RE.sub(" ", s)
     s = _MULTI_NL.sub("\n\n", s)
     return "\n".join(line.strip() for line in s.splitlines() if line.strip())
@@ -101,7 +101,7 @@ class HtmlSource:
             if ev:
                 events.append(ev)
         note = "页面 %d 字" % len(text)
-        if self.llm.truncated:
+        if getattr(lr, "truncated", False):
             note += "（已截断）"
         return SourceResult(self.name, True, len(events), events,
                             note=note, used_llm=True, raw_bytes=len(res.text or ""))

@@ -34,6 +34,11 @@ def parse_date(text, default_year=None):
     return None
 
 
+def has_explicit_year(text):
+    """日期串里是否写明了四位年份（决定能不能做跨年补年）。"""
+    return bool(text) and bool(_DATE_PATTERNS[0].search(str(text)))
+
+
 def is_weekend(d):
     return d.weekday() >= 5  # 5=周六 6=周日
 

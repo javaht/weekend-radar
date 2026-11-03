@@ -1,4 +1,3 @@
-import re
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """北京周末活动雷达 —— 唯一入口。
@@ -11,6 +10,7 @@ import re
 import argparse
 import datetime
 import os
+import re
 import sys
 import time
 
@@ -121,6 +121,17 @@ def _dates_compatible(st1, et1, st2, et2):
     return max(st1, st2) <= min(et1, et2)
 
 
+def _mark_venue_conflict(ev, other_venue):
+    """给一条活动挂上「场馆信息冲突（待核实）」标注, 同一对场馆只标一次。"""
+    pair = "%s / %s" % (ev.venue or "—", other_venue or "—")
+    marked = ev.extra.setdefault("venue_conflicts", [])
+    if pair in marked:
+        return
+    marked.append(pair)
+    ev.extra["venue_conflict"] = "；".join(marked)
+    ev.note = (ev.note + "；" if ev.note else "") + "场馆信息冲突（待核实）：%s" % pair
+
+
 def _merge(events, log=print):
     """跨源合并同名活动（支持日期区间交集与字段质量裁决）。
 
@@ -133,16 +144,26 @@ def _merge(events, log=print):
     conflicts = 0
     for ev in events:
         matched = None
+        rivals = []      # 同名、日期兼容、但场馆不同的条目
         for cur in merged_list:
-            if cur.name_norm == ev.name_norm:
-                if venue_same(cur.venue, ev.venue):
-                    if _dates_compatible(cur.start_date, cur.end_date, ev.start_date, ev.end_date):
-                        matched = cur
-                        break
+            if cur.name_norm != ev.name_norm:
+                continue
+            if not _dates_compatible(cur.start_date, cur.end_date, ev.start_date, ev.end_date):
+                continue
+            if venue_same(cur.venue, ev.venue):
+                matched = cur
+                break
+            rivals.append(cur)
 
         if not matched:
             ev.extra.setdefault("sources", [ev.source] if ev.source else [])
             merged_list.append(ev)
+            # ★ 场馆冲突只能在「没合并」的分支里检出: 合并的前提就是 venue_same,
+            #   合并之后再比必然相同。宁可漏合并不可错合并, 所以不合并, 两边都标注。
+            for other in rivals:
+                conflicts += 1
+                _mark_venue_conflict(other, ev.venue)
+                _mark_venue_conflict(ev, other.venue)
             continue
 
         cur = matched
@@ -180,13 +201,6 @@ def _merge(events, log=print):
         for field in ("has_goods", "i_friendly"):
             if getattr(cur, field) is None and getattr(ev, field) is not None:
                 setattr(cur, field, getattr(ev, field))
-
-        # 场馆冲突检测
-        if _venue_conflict(cur.venue, ev.venue):
-            conflicts += 1
-            cur.extra["venue_conflict"] = "%s / %s" % (cur.venue, ev.venue)
-            if "场馆冲突" not in (cur.note or ""):
-                cur.note = (cur.note + "；" if cur.note else "") +                     "场馆信息冲突（待核实）：%s / %s" % (cur.venue, ev.venue)
 
     if conflicts:
         log("  [警告] 检出 %d 处跨源场馆冲突, 已标注待核实" % conflicts)
@@ -268,11 +282,13 @@ def do_plan(cfg, src_rows):
         log("[!] config.ini 的 [sources] 没有任何启用的源")
         return EXIT_ARG
     events, stats = _collect(sources)
+    raw_n = len(events)
     events = _merge(events, log)
+    merged_n = len(events)
     exclude = csv_list(cfg, "radar", "exclude_keywords")
     events = _filter(events, today, days, weekend_only, exclude)
     log("")
-    log("合并去重后 %d 条，落在窗口内 %d 条" % (len(events), len(events)))
+    log("采集 %d 条，合并去重后 %d 条，落在窗口内 %d 条" % (raw_n, merged_n, len(events)))
     for ev in sorted(events, key=lambda e: (e.start_date, e.name)):
         log("  %s | %s | %s | %s" % (ev.start_date, ev.name, ev.venue or "—",
                                     ev.category))
@@ -324,10 +340,13 @@ def _decide_push(cfg, stats, diff, events, today):
     n_new = len(diff["new"])
     n_gone = len(diff["gone"])
     n_addr = sum(1 for c in diff["changed"] if "改地址" in c["kind"])
+    # ★ 截止提醒只在「剩 3 天」和「剩 1 天」这两天触发。
+    #   原来是 0~3 天内每天都推, 一个截止就能连推 4 天, 绕过「无变化不推」。
+    remind_days = {3, 1}
     urgent = False
     for ev in events:
         d = TR.parse_date(ev.deadline, today.year) if ev.deadline else None
-        if d and 0 <= (d - today).days <= 3:
+        if d and (d - today).days in remind_days:
             urgent = True
             break
     notify_no_change = as_bool(cfg, "push", "notify_on_no_change", False)
@@ -342,7 +361,7 @@ def _decide_push(cfg, stats, diff, events, today):
     if n_new >= min_new:
         return True, "新增 %d 条" % n_new
     if urgent:
-        return True, "3 天内有截止"
+        return True, "临近报名截止"
     if notify_no_change:
         return True, "每日报告（无实质变化）"
     return False, "无实质变化（新增 %d/%d，变化 %d），不推送" % (
@@ -495,6 +514,27 @@ def self_test():
     check("合并后日期扩展为最大区间", m_res[0].end_date == "2026-11-01")
     check("优质票价胜出", m_res[0].price_text == "¥168-399")
     check("直达购票链接胜出", "bilibili.com" in m_res[0].url)
+    ev_c1 = Event(name="北京·某漫展", start_date="2026-11-07",
+                  venue="北京酷车国际汇展中心", source="bendibao")
+    ev_c2 = Event(name="某漫展", start_date="2026-11-07",
+                  venue="北京大红门国际会展中心", source="manzhan")
+    c_res = _merge([ev_c1, ev_c2])
+    check("同名同日不同场馆不合并", len(c_res) == 2, "实际 %d 条" % len(c_res))
+    check("同名同日不同场馆两边都标「待核实」",
+          all(e.extra.get("venue_conflict") and "待核实" in e.note for e in c_res))
+
+    log("自测: 补年份只作用于缺年份的日期")
+    from sources.base import _parse_flexible
+    real_today = datetime.date.today()
+    old_iso = (real_today - datetime.timedelta(days=200)).isoformat()
+    check("写明年份的旧日期不被加一年",
+          _parse_flexible(old_iso) == datetime.date.fromisoformat(old_iso),
+          "%s -> %s" % (old_iso, _parse_flexible(old_iso)))
+    old_md = real_today - datetime.timedelta(days=100)
+    bumped = _parse_flexible("%d/%d" % (old_md.month, old_md.day))
+    check("缺年份的日期仍按跨年规则补年",
+          bumped is not None and bumped > real_today - datetime.timedelta(days=60),
+          "%s -> %s" % (old_md, bumped))
 
     log("自测: 场馆冲突判定")
     check("同场馆带地址不算冲突",
@@ -589,6 +629,90 @@ def self_test():
             for p in (tmp3, tmp3 + "-journal"):
                 if os.path.exists(p):
                     os.remove(p)
+
+        log("自测: 改期 / 过期归档 / 多源稳定性 / 变更确认 / 复活")
+
+        def _tmp_store(suffix, **kw):
+            path = tmp_db + suffix
+            for p in (path, path + "-journal"):
+                if os.path.exists(p):
+                    os.remove(p)
+            return path, Store(path, log, **kw)
+
+        def _drop(path, st):
+            st.close()
+            for p in (path, path + "-journal"):
+                if os.path.exists(p):
+                    os.remove(p)
+
+        def _ev(start, end=None, venue="某馆", price="¥50", source="bili", srcs=None):
+            e = Event(name="北京·复测展", start_date=start, end_date=end or start,
+                      venue=venue, price_text=price, source=source)
+            if srcs:
+                e.extra["sources"] = list(srcs)
+            return e
+
+        p4, s4 = _tmp_store(".4", stable_sources=["bili"])
+        try:
+            s4.apply([_ev("2026-11-07")], today.isoformat(), True, ok_stats)
+            r1 = s4.apply([_ev("2026-11-14")], today.isoformat(), True, ok_stats)
+            check("改期首轮不报 NEW 也不报变化",
+                  not r1["new"] and not r1["changed"] and not r1["gone"],
+                  "new=%d changed=%d gone=%d" % (len(r1["new"]), len(r1["changed"]), len(r1["gone"])))
+            r2 = s4.apply([_ev("2026-11-14")], today.isoformat(), True, ok_stats)
+            check("改期连续两轮后报「改期」",
+                  any("改期" in c["kind"] for c in r2["changed"]) and not r2["new"])
+            n_rows = s4.conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
+            check("改期不会留下重复记录", n_rows == 1, "实际 %d 行" % n_rows)
+        finally:
+            _drop(p4, s4)
+
+        p5, s5 = _tmp_store(".5", stable_sources=["bili"])
+        try:
+            s5.apply([_ev("2026-10-28")], "2026-10-27", True, ok_stats)
+            r = s5.apply([], "2026-10-30", True, ok_stats)
+            r = s5.apply([], "2026-10-31", True, ok_stats)
+            st = s5.conn.execute("SELECT status FROM events").fetchone()[0]
+            check("已结束活动归档为 expired 而不是 gone",
+                  st == "expired" and not r["gone"], "status=%s gone=%d" % (st, len(r["gone"])))
+        finally:
+            _drop(p5, s5)
+
+        p6, s6 = _tmp_store(".6", stable_sources=["bili"], gone_after=2)
+        try:
+            s6.apply([_ev("2026-11-07", source="bendibao", srcs=["bendibao", "bili"])],
+                     today.isoformat(), True, ok_stats)
+            s6.apply([], today.isoformat(), True, ok_stats)
+            g = s6.apply([], today.isoformat(), True, ok_stats)
+            check("合并后首源非稳定源、但含 bili 时仍参与取消判定", len(g["gone"]) == 1)
+            back = s6.apply([_ev("2026-11-07")], today.isoformat(), True, ok_stats)
+            st = s6.conn.execute("SELECT status FROM events").fetchone()[0]
+            check("取消后重新出现的活动被复活为 active",
+                  len(back["new"]) == 1 and st == "active", "status=%s" % st)
+        finally:
+            _drop(p6, s6)
+
+        p7, s7 = _tmp_store(".7", stable_sources=["bili"])
+        try:
+            s7.apply([_ev("2026-11-07", price="¥50")], today.isoformat(), True, ok_stats)
+            s7.apply([_ev("2026-11-07", price="¥60")], today.isoformat(), True, ok_stats)
+            r = s7.apply([_ev("2026-11-07", price="¥70")], today.isoformat(), True, ok_stats)
+            check("变更来回乱跳不累计确认", not r["changed"], "changed=%d" % len(r["changed"]))
+            r = s7.apply([_ev("2026-11-07", price="¥70")], today.isoformat(), True, ok_stats)
+            check("同一新值连续两轮才确认改价", any("改价" in c["kind"] for c in r["changed"]))
+        finally:
+            _drop(p7, s7)
+
+        log("自测: 截止提醒不连推")
+        dl_cfg = {"push": {"min_new_changes": "3", "notify_on_no_change": "false",
+                           "notify_on_source_failure": "true"}}
+        empty_diff = {"new": [], "changed": [], "gone": []}
+        def _dl(days_left):
+            e = _ev("2026-11-07")
+            e.deadline = (today + datetime.timedelta(days=days_left)).isoformat()
+            return _decide_push(dl_cfg, ok_stats, empty_diff, [e], today)[0]
+        check("截止剩 3 天 / 1 天时推送", _dl(3) and _dl(1))
+        check("截止剩 2 天 / 0 天时不重复推", not _dl(2) and not _dl(0))
 
         meta = _meta(None, type("L", (), {"calls": 0, "model": "-",
                                           "_resolved": None,
