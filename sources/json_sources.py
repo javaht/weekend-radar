@@ -5,6 +5,7 @@
   - 解析写得尽量宽容(递归找列表、字段多别名), 而不是死磕某个字段路径;
   - 拿不到就返回 ok=False + 原因, 让上层发健康告警, 绝不假装"今天没活动"。
 """
+import re
 import time
 
 from sources.base import SourceResult, coerce_event
@@ -333,3 +334,160 @@ class CnccSource:
                     events.append(ev)
         
         return SourceResult(self.name, True, len(events), events, note="months=%s,%s" % (m1, m2), raw_bytes=total_bytes)
+
+
+class OschinaSource:
+    """开源中国活动。www.oschina.net/event 是纯 JS 页面(正文只有 31 字), 走 HTML+LLM
+    必然天天失败; 页面背后的 apiv1 接口直接给开始/结束/报名截止/城市/收费, 所以走 JSON。
+
+    已知: 列表按开始时间倒序, 不支持按城市过滤未来活动, 所以翻几页后本地按城市筛;
+    「线上」活动不收(雷达只看线下)。
+
+    GOTC(开源中国自家的年度大会)不在活动列表里, 只在 gotc.oschina.net。那个站没有数据接口,
+    日期/地点写死在前端 JS 的配置对象里, 所以单独解析(见 _fetch_gotc)。
+    """
+
+    name = "oschina"
+    kind = "J"
+    MAX_PAGES = 4
+    PAGE_SIZE = 50
+    GOTC_URL = "https://gotc.oschina.net/"
+    # 前端配置对象: {name:"GOTC 2026",full:"全球开源技术峰会",theme:"...",date:"2026.11.14",place:"..."}
+    _GOTC_CONF_RE = re.compile(r'\{name:"(GOTC[^"]*)"[^{}]*?\}')
+    _GOTC_REGISTER_RE = re.compile(r'register:"(https?://[^"]+)"')
+    _CHUNK_IMPORT_RE = re.compile(r'import\("\./([\w.-]+\.js)"\)')
+
+    @staticmethod
+    def _js_field(obj_src, key):
+        m = re.search(r'\b%s:"([^"]*)"' % key, obj_src)
+        return m.group(1) if m else ""
+
+    def _fetch_gotc(self):
+        """返回 (Event 或 None, 错误串)。站点首页 → 主 JS → GOTC 页面的分包 → 配置对象。
+
+        分包文件名带内容哈希, 每次发版都变, 所以每轮都从首页现找, 不写死。
+        """
+        home = self.fetcher.get(self.GOTC_URL)
+        if not home.ok:
+            return None, "GOTC 首页: %s" % home.err
+        m = re.search(r'src="(/assets/[\w.-]+\.js)"', home.text or "")
+        if not m:
+            return None, "GOTC 首页没找到主 JS"
+        root = self.GOTC_URL.rstrip("/")
+        main = self.fetcher.get(root + m.group(1))
+        if not main.ok:
+            return None, "GOTC 主 JS: %s" % main.err
+        js = main.text or ""
+        # 路由表里: import("./index-xxxx.js") ... meta:{title:"GOTC 2026 · ..."}
+        chunk = ""
+        for im in self._CHUNK_IMPORT_RE.finditer(js):
+            if "GOTC" in js[im.end():im.end() + 300]:
+                chunk = im.group(1)
+                break
+        if chunk:
+            page = self.fetcher.get(root + "/assets/" + chunk)
+            if not page.ok:
+                return None, "GOTC 页面分包: %s" % page.err
+            js = page.text or ""
+        conf = self._GOTC_CONF_RE.search(js)
+        if not conf:
+            return None, "GOTC 页面结构变了, 没找到 {name:\"GOTC...\"} 配置对象"
+        src = conf.group(0)
+        title = " ".join(x for x in (conf.group(1), self._js_field(src, "full")) if x)
+        place = self._js_field(src, "place")
+        if self.city_name not in place:
+            return None, ""          # 今年不在本城市: 不是错误
+        reg = self._GOTC_REGISTER_RE.search(js)
+        ev = coerce_event({
+            "name": title,
+            "start_date": self._js_field(src, "date"),
+            "venue": place,
+            "url": self.GOTC_URL,
+            "note": "；".join(x for x in (
+                self._js_field(src, "theme"),
+                "观众报名: %s" % reg.group(1) if reg else "") if x),
+        }, self.name, default_category="B", fallback_url=self.GOTC_URL)
+        if not ev:
+            return None, "GOTC 日期解析失败: %r" % self._js_field(src, "date")
+        return ev, ""
+
+    def __init__(self, url, cfg, fetcher, log=print):
+        self.url = url
+        self.cfg = cfg
+        self.fetcher = fetcher
+        self.log = log
+        city = str(cfg.get("city", "") or "北京").strip()
+        if len(city) > 2 and city.endswith("市"):
+            city = city[:-1]
+        self.city_name = city
+
+    def _in_city(self, item):
+        where = "%s %s %s" % (item.get("province") or "", item.get("city") or "",
+                              item.get("spot") or "")
+        return self.city_name in where and "线上" not in where
+
+    def fetch(self):
+        import json as _json
+        import datetime as _dt
+        from html import unescape as _unescape
+        headers = {"Referer": "https://www.oschina.net/event",
+                   "Accept": "application/json, text/plain, */*"}
+        # 比赛类活动开始得早、结束得晚, 往回多翻一些; 开始时间早于这条线就停
+        stop_before = (_dt.date.today() - _dt.timedelta(days=180)).isoformat()
+        items, raw = [], 0
+        for page in range(1, self.MAX_PAGES + 1):
+            res = self.fetcher.get_json(
+                self.url, params={"pageNum": page, "pageSize": self.PAGE_SIZE},
+                headers=headers)
+            if not res.ok:
+                if page == 1:
+                    return SourceResult(self.name, False,
+                                        err=res.err or ("HTTP %s" % res.status))
+                break
+            raw += len(res.text or "")
+            try:
+                obj = _json.loads(res.text)
+            except Exception:
+                return SourceResult(self.name, False, err="返回非 JSON", raw_bytes=raw)
+            if obj.get("code") != 200 or not isinstance(obj.get("result"), list):
+                return SourceResult(self.name, False,
+                                    err="接口返回 code=%s %s" % (obj.get("code"), obj.get("message")),
+                                    raw_bytes=raw)
+            batch = obj["result"]
+            items.extend(batch)
+            if len(batch) < self.PAGE_SIZE or all(
+                    str(i.get("startTime") or "") < stop_before for i in batch):
+                break
+
+        events = []
+        for item in items:
+            if not self._in_city(item):
+                continue
+            eid = item.get("id")
+            fee_free = item.get("feeType") == 0
+            detail = str(item.get("feeDetail") or "").strip()
+            ev = coerce_event({
+                "name": _unescape(str(item.get("topic") or "")),   # 标题里有 &amp; 之类实体
+                "start_date": item.get("startTime"),
+                "end_date": item.get("endTime"),
+                "venue": item.get("spot") or item.get("city"),
+                "price_text": "免费" if fee_free else (detail or "收费"),
+                "is_free": True if fee_free else None,
+                "url": ("https://www.oschina.net/event/%s" % eid) if eid else "",
+                "deadline": str(item.get("joinDeadTime") or "")[:10],
+                "note": "开源中国活动",
+            }, self.name, default_category="B", fallback_url="https://www.oschina.net/event")
+            if ev:
+                events.append(ev)
+
+        gotc, gerr = self._fetch_gotc()
+        if gerr:
+            # ★ 判失败而不是悄悄跳过: GOTC 是这个源存在的主要理由之一, 抓不到要有告警
+            return SourceResult(self.name, False, err=gerr, raw_bytes=raw)
+        if gotc and not any(e.name_norm == gotc.name_norm for e in events):
+            events.append(gotc)
+        return SourceResult(self.name, True, len(events), events,
+                            note="接口 %d 条, %s 线下 %d 条%s" % (
+                                len(items), self.city_name, len(events),
+                                "（含 GOTC）" if gotc else ""),
+                            raw_bytes=raw)

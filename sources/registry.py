@@ -7,7 +7,7 @@
 from core.config import parse_source_row
 from sources.base import SourceResult
 from sources.html_sources import HtmlSource, Expo090Source
-from sources.json_sources import DamaiSource, BiliSource, CppSource, CnccSource
+from sources.json_sources import DamaiSource, BiliSource, CppSource, CnccSource, OschinaSource
 
 # 默认类目: A 展会/漫展/市集  B 技术  C 博览会
 CATEGORY_HINTS = {
@@ -67,6 +67,8 @@ def build_sources(cfg, src_rows, fetcher, llm, today, window_end,
                 obj = CppSource(url, cfg["extra"], fetcher, log)
             elif name == "cncc":
                 obj = CnccSource(url, cfg["extra"], fetcher, log)
+            elif name == "oschina":
+                obj = OschinaSource(url, cfg["extra"], fetcher, log)
             else:
                 obj = UnsupportedSource(name, "未实现该 JSON 源", log)
         elif kind == "H":
