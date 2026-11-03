@@ -12,7 +12,7 @@
 import datetime
 
 from core.models import Event
-from core.timerange import parse_date
+from core.timerange import parse_date, has_explicit_year
 
 
 class SourceResult:
@@ -87,6 +87,9 @@ def _parse_flexible(value):
 
     补年份规则: 只给了 11/7 这种, 用今年; 若得到的日期比今天早 60 天以上,
     认为是明年(因为雷达只看未来), 加一年。这条规则避免年底/年初的跨年错误。
+
+    ★ 只对「原文没写年份」的串补年。写明了 2025-11-20 的就是去年的活动
+      (常见于 LLM 读到旧文章), 加一年会把它伪装成本月活动混进报告。
     """
     if value is None or value == "":
         return None
@@ -105,7 +108,7 @@ def _parse_flexible(value):
     d = parse_date(s, today.year)
     if d is None:
         return None
-    if d < today - datetime.timedelta(days=60):
+    if not has_explicit_year(s) and d < today - datetime.timedelta(days=60):
         try:
             d = d.replace(year=d.year + 1)
         except ValueError:

@@ -149,6 +149,11 @@ class Fetcher:
                 if r.status_code != 200:
                     return FetchResult(False, r.status_code, "", target,
                                        "HTTP %d" % r.status_code, elapsed)
+                # ★ 先定编码再看内容: 响应头没写 charset 时 requests 按 ISO-8859-1 解码,
+                #   GBK/UTF-8 中文页会变乱码, 「哎呀，访问太快」这类拦截特征就匹配不到。
+                #   头里明确给了 charset 就信它, 不再跑较慢的 apparent_encoding。
+                if not r.encoding or r.encoding.lower() == "iso-8859-1":
+                    r.encoding = r.apparent_encoding or r.encoding
                 if _looks_blocked(r.text):
                     return FetchResult(False, 200, r.text, target,
                                        "反爬拦截（命中验证页，需 cookie 或换 IP）", elapsed)
@@ -158,7 +163,6 @@ class Fetcher:
                     except Exception:
                         return FetchResult(False, 200, r.text, target,
                                            "返回的不是 JSON", elapsed)
-                r.encoding = r.apparent_encoding or r.encoding
                 return FetchResult(True, 200, r.text, target, "", elapsed)
             except Exception as e:
                 last_err = "%s: %s" % (type(e).__name__, e)

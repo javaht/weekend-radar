@@ -46,7 +46,7 @@ PROVIDER_PRESETS = {
     "anthropic": {
         "base_url": "https://api.anthropic.com/v1",
         "mode": "anthropic",
-        "model": "claude-3-5-haiku-latest",
+        "model": "claude-haiku-5-5",
         "env_keys": ("RADAR_LLM_KEY", "ANTHROPIC_API_KEY"),
         "use_key_file": False,
     },
@@ -122,7 +122,7 @@ def build_endpoint_url(base_url, proto):
 
 
 class LLMResult:
-    __slots__ = ("ok", "text", "err", "proto", "model")
+    __slots__ = ("ok", "text", "err", "proto", "model", "truncated")
 
     def __init__(self, ok, text="", err="", proto="", model=""):
         self.ok = ok
@@ -130,6 +130,7 @@ class LLMResult:
         self.err = err
         self.proto = proto
         self.model = model
+        self.truncated = False   # 本次调用的输入是否被截断（按次返回, 不跨源串味）
 
     def __repr__(self):
         return "LLMResult(ok=%s proto=%s len=%d err=%s)" % (
@@ -236,7 +237,7 @@ class LLM:
     def _call_anthropic(self, prompt, system):
         headers = {
             "x-api-key": self.key or "magic",
-            "api-version": "2023-06-01",
+            "anthropic-version": "2023-06-01",
         }
         payload = {
             "model": self.model,
@@ -339,6 +340,7 @@ class LLM:
             return LLMResult(False, err="LLM 输出无法解析为 JSON 数组: %r" % (res.text[:160],),
                              proto=res.proto, model=res.model)
         res.text = arr  # 复用字段装解析后的结果
+        res.truncated = truncated
         return res
 
     @staticmethod
