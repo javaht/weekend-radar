@@ -45,6 +45,10 @@ class CsdnFeedSource:
         self.today = today
         self.window_end = window_end
         self.log = log
+        city = str(cfg.get("city", "") or "北京").strip()
+        if len(city) > 2 and city.endswith("市"):
+            city = city[:-1]
+        self.city_name = city
 
     # ---------------------------------------------------------------- 发现
     def _discover(self):
@@ -80,9 +84,10 @@ class CsdnFeedSource:
             "任务: 挑出属于【线下/线上活动预告或报名】的条目——"
             "技术沙龙、Meetup、开发者大会、峰会、Workshop、赛事、直播预告、训练营等。\n"
             "排除: 产品软文、品牌推广、选购指南、行情分析、新闻评论、招聘广告。\n"
+            "特别注意: 若标题明确标注了外地城市站（如上海站/广州站/深圳站等）且不含当前目标城市【%s】，也必须排除。\n"
             "拿不准的宁可排除。输出被选中条目的标题原文: [\"标题1\",\"标题2\"]。"
             "没有一条符合就输出 []。"
-        )
+        ) % self.city_name
         prompt = "文章列表共 %d 条:\n%s" % (len(lines), body)
         res = self.llm.complete(prompt, system)
         if not res.ok:

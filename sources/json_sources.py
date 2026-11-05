@@ -655,10 +655,13 @@ class CsdnCalendarSource:
             note = "CSDN 活动日历"
             label = str(ext.get("label") or "").strip()
             venue = label or "见链接"
-            # 活动日历多为全国运营位; 城市标签与当前城市无关时也保留(note 里注明城市),
-            # 因为链接里常有报名入口, 城市过滤交给上层 LLM 去重/过滤
-            if label and self.city_name not in (label + venue):
-                note += " · %s" % label
+
+            # 城市硬过滤: CSDN 首页活动日历为全国运营位(ext.label 标明城市如"上海","北京")。
+            # 若标了城市且不是当前目标城市，或标题明确写了外地城市站且不含当前城市，必须过滤。
+            where = "%s %s" % (label, title)
+            if self.city_name not in where:
+                continue
+
             ev = coerce_event({
                 "name": title,
                 "start_date": d.isoformat(),
