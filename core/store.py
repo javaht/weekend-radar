@@ -259,7 +259,7 @@ class Store:
                     self.conn.execute(
                         "UPDATE events SET status='gone', miss_count=?, last_seen=? WHERE id=?",
                         (misses, today_iso, row["id"]))
-                    gone_list.append(row)
+                    gone_list.append(dict(row))
                 else:
                     # 先记一次缺席，下一轮还缺再判取消
                     self.conn.execute("UPDATE events SET miss_count=? WHERE id=?",
