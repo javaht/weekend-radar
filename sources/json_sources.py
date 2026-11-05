@@ -491,3 +491,94 @@ class OschinaSource:
                                 len(items), self.city_name, len(events),
                                 "（含 GOTC）" if gotc else ""),
                             raw_bytes=raw)
+
+
+class CsdnSource:
+    """CSDN 技术会议。huiyi.csdn.net 已跳到 con.csdn.net(DevCon 技术会议平台), 纯 JS 页面,
+    HTML+LLM 方式只能拿到空壳。页面背后的列表接口不需要登录, 直接给开始/结束/城市/线上线下。
+
+    已知: 接口是 POST + JSON body(GET 会 500); page 从 0 开始。
+    """
+
+    name = "csdn"
+    kind = "J"
+    MAX_PAGES = 5
+    PAGE_SIZE = 20
+    SITE = "https://con.csdn.net"
+
+    def __init__(self, url, cfg, fetcher, log=print):
+        self.url = url
+        self.cfg = cfg
+        self.fetcher = fetcher
+        self.log = log
+        city = str(cfg.get("city", "") or "北京").strip()
+        if len(city) > 2 and city.endswith("市"):
+            city = city[:-1]
+        self.city_name = city
+
+    def _post(self, body):
+        import json as _json
+        # Fetcher 只有 GET, 这里复用它的 Session / 限速 / 退避
+        self.fetcher._throttle()
+        last = ""
+        for attempt in range(1, self.fetcher.retries + 1):
+            try:
+                r = self.fetcher._sess().post(
+                    self.url, json=body, timeout=self.fetcher.timeout,
+                    headers={"Referer": self.SITE + "/",
+                             "Accept": "application/json, text/plain, */*"})
+                if r.status_code >= 500 and attempt < self.fetcher.retries:
+                    last = "HTTP %d" % r.status_code
+                    self.fetcher._sleep_backoff(attempt)
+                    continue
+                return _json.loads(r.text), len(r.text or "")
+            except Exception as e:
+                last = "%s: %s" % (type(e).__name__, e)
+                if attempt < self.fetcher.retries:
+                    self.fetcher._sleep_backoff(attempt)
+                    continue
+        raise RuntimeError(last)
+
+    def fetch(self):
+        items, raw = [], 0
+        for page in range(self.MAX_PAGES):
+            try:
+                obj, n = self._post({"page": page, "size": self.PAGE_SIZE})
+            except Exception as e:
+                if page == 0:
+                    return SourceResult(self.name, False, err=str(e))
+                break
+            raw += n
+            if obj.get("code") != 200 or not isinstance(obj.get("data"), dict):
+                return SourceResult(self.name, False,
+                                    err="接口返回 code=%s %s" % (obj.get("code"), obj.get("msg")),
+                                    raw_bytes=raw)
+            data = obj["data"]
+            batch = data.get("items") or []
+            items.extend(batch)
+            if not batch or page + 1 >= int(data.get("totalPages") or 1):
+                break
+
+        events = []
+        for item in items:
+            if item.get("ended") or item.get("format") == "ONLINE":
+                continue
+            where = "%s %s" % (item.get("cityName") or "", item.get("venue") or "")
+            if self.city_name not in where:
+                continue
+            note = " · ".join(x for x in (item.get("meetingTypeDisplay"),
+                                          item.get("organizerName")) if x)
+            ev = coerce_event({
+                "name": item.get("title"),
+                "start_date": item.get("startTime"),
+                "end_date": item.get("endTime"),
+                "venue": item.get("venue") or item.get("cityName"),
+                "url": "%s/%s" % (self.SITE, item["id"]) if item.get("id") else "",
+                "note": note,
+            }, self.name, default_category="B", fallback_url=self.SITE)
+            if ev:
+                events.append(ev)
+        return SourceResult(self.name, True, len(events), events,
+                            note="接口 %d 条, %s 线下未结束 %d 条" % (
+                                len(items), self.city_name, len(events)),
+                            raw_bytes=raw)
