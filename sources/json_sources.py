@@ -5,6 +5,7 @@
   - 解析写得尽量宽容(递归找列表、字段多别名), 而不是死磕某个字段路径;
   - 拿不到就返回 ok=False + 原因, 让上层发健康告警, 绝不假装"今天没活动"。
 """
+import datetime
 import re
 import time
 
@@ -582,3 +583,91 @@ class CsdnSource:
                             note="接口 %d 条, %s 线下未结束 %d 条" % (
                                 len(items), self.city_name, len(events)),
                             raw_bytes=raw)
+
+
+class CsdnCalendarSource:
+    """CSDN 首页「活动日历」(event-calendar): SSR JSON, 无需登录无签名。
+
+    字段极干净(ext.event_date 是 MM-DD, ext.label 是城市), 直接代码映射, 不过 LLM。
+    数量少(通常 2-5 条), 但都是 CSDN 运营人工挂上去的活动, 信噪比极高。
+
+    URL 是外链(活动行/主办方官网), 日期只到"月-日"——年份由代码补(雷达只看未来)。
+    """
+
+    name = "csdncalendar"
+    kind = "J"
+    HOME = "https://www.csdn.net/"
+
+    def __init__(self, url, cfg, fetcher, log=print):
+        self.url = url
+        self.cfg = cfg
+        self.fetcher = fetcher
+        self.log = log
+        city = str(cfg.get("city", "") or "北京").strip()
+        if len(city) > 2 and city.endswith("市"):
+            city = city[:-1]
+        self.city_name = city
+
+    def fetch(self):
+        from sources.base import extract_initial_state
+        res = self.fetcher.get(self.HOME,
+                               headers={"Referer": "https://www.csdn.net/"})
+        if not res.ok:
+            return SourceResult(self.name, False,
+                                err=res.err or ("HTTP %s" % res.status))
+        st = extract_initial_state(res.text)
+        items = []
+        if st:
+            try:
+                items = (((st.get("pageData") or {}).get("data") or {})
+                         .get("event-calendar") or [])
+            except Exception:
+                items = []
+        if not isinstance(items, list) or not items:
+            return SourceResult(self.name, False,
+                                err="首页未找到 event-calendar 组件(页面结构可能已改版)",
+                                raw_bytes=len(res.text or ""))
+
+        today = datetime.date.today()
+        events = []
+        for it in items:
+            if not isinstance(it, dict):
+                continue
+            ext = it.get("ext") or {}
+            md = str(ext.get("event_date") or "")
+            m = re.match(r"^(\d{1,2})[-/月](\d{1,2})", md)
+            if not m:
+                continue
+            try:
+                d = datetime.date(today.year, int(m.group(1)), int(m.group(2)))
+            except ValueError:
+                continue
+            # 只有 MM-DD: 已过去 60 天以上的认为是明年(跨年), 与 coerce_event 补年规则一致
+            if d < today - datetime.timedelta(days=60):
+                try:
+                    d = d.replace(year=d.year + 1)
+                except ValueError:
+                    continue
+            title = str(it.get("title") or "").strip()
+            if not title:
+                continue
+            url = str(it.get("url") or "").strip()
+            note = "CSDN 活动日历"
+            label = str(ext.get("label") or "").strip()
+            venue = label or "见链接"
+            # 活动日历多为全国运营位; 城市标签与当前城市无关时也保留(note 里注明城市),
+            # 因为链接里常有报名入口, 城市过滤交给上层 LLM 去重/过滤
+            if label and self.city_name not in (label + venue):
+                note += " · %s" % label
+            ev = coerce_event({
+                "name": title,
+                "start_date": d.isoformat(),
+                "venue": venue,
+                "url": url,
+                "note": note,
+            }, self.name, default_category="B", fallback_url=self.HOME)
+            if ev:
+                events.append(ev)
+        return SourceResult(self.name, True, len(events), events,
+                            note="首页 event-calendar %d 条" % len(events),
+                            raw_bytes=len(res.text or ""))

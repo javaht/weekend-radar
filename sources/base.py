@@ -10,9 +10,53 @@
   把"预售"写成"现场"), 而票价和购票类型恰恰是最不能错的字段。
 """
 import datetime
+import json
+import re
 
 from core.models import Event
 from core.timerange import parse_date, has_explicit_year
+
+# SSR 页面里的 window.__INITIAL_STATE__ = {...}; 大括号配平才能整段抠出来
+_STATE_RE = re.compile(r"__INITIAL_STATE__\s*=\s*")
+
+
+def extract_initial_state(html):
+    """从 CSDN SSR 页面抠 __INITIAL_STATE__ JSON。拿不到返回 None。"""
+    if not html:
+        return None
+    m = _STATE_RE.search(html)
+    if not m:
+        return None
+    start = html.find("{", m.end() - 1)
+    if start < 0:
+        return None
+    depth, i = 0, start
+    in_str, esc = False, False
+    while i < len(html):
+        c = html[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif c == "\\":
+                esc = True
+            elif c == '"':
+                in_str = False
+        else:
+            if c == '"':
+                in_str = True
+            elif c == "{":
+                depth += 1
+            elif c == "}":
+                depth -= 1
+                if depth == 0:
+                    break
+        i += 1
+    if depth != 0:
+        return None
+    try:
+        return json.loads(html[start:i + 1])
+    except Exception:
+        return None
 
 
 class SourceResult:

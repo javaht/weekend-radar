@@ -7,7 +7,9 @@
 from core.config import parse_source_row
 from sources.base import SourceResult
 from sources.html_sources import HtmlSource, Expo090Source
-from sources.json_sources import DamaiSource, BiliSource, CppSource, CnccSource, OschinaSource, CsdnSource
+from sources.json_sources import (DamaiSource, BiliSource, CppSource, CnccSource,
+                                    OschinaSource, CsdnSource, CsdnCalendarSource)
+from sources.csdnfeed import CsdnFeedSource
 
 # 默认类目: A 展会/漫展/市集  B 技术  C 博览会
 CATEGORY_HINTS = {
@@ -15,7 +17,8 @@ CATEGORY_HINTS = {
     "damai": "A", "bili": "A", "lianpu": "A", "huodong": "A", "xiudong": "A",
     "chnmuseum": "A", "chncpa": "A", "artron": "A", "cpp": "A",
     "gcores": "B", "taptap": "B", "indienova": "B", "oschina": "B",
-    "segmentfault": "B", "csdn": "B", "xiaoheihe": "B", "openatom": "B",
+    "segmentfault": "B", "csdn": "B", "csdncalendar": "B", "csdnfeed": "B",
+    "xiaoheihe": "B", "openatom": "B",
     "datexpo": "C", "onezh": "C", "zhandaren": "C", "cnena": "C", "cncc": "C",
 }
 
@@ -71,10 +74,15 @@ def build_sources(cfg, src_rows, fetcher, llm, today, window_end,
                 obj = OschinaSource(url, cfg["extra"], fetcher, log)
             elif name == "csdn":
                 obj = CsdnSource(url, cfg["extra"], fetcher, log)
+            elif name == "csdncalendar":
+                obj = CsdnCalendarSource(url, cfg["extra"], fetcher, log)
             else:
                 obj = UnsupportedSource(name, "未实现该 JSON 源", log)
         elif kind == "H":
-            if name == "expo090":
+            if name == "csdnfeed":
+                obj = CsdnFeedSource(url, cfg["extra"], fetcher, llm,
+                                     today, window_end, log)
+            elif name == "expo090":
                 obj = Expo090Source(name, url, cfg["extra"], fetcher, llm,
                                     today, window_end, log, cat)
             else:
