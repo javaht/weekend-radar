@@ -224,6 +224,7 @@ class LLM:
             "messages": ([{"role": "system", "content": system}] if system else [])
                         + [{"role": "user", "content": prompt}],
             "temperature": float(self.temperature or 0),
+            "max_tokens": 4096,
         }
         url = build_endpoint_url(self.base, "openai")
         status, body = self._post_url(url, payload, headers)
