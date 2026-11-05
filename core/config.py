@@ -177,6 +177,7 @@ DEFAULTS = {
         "key": "",
         "key_file": "~/.config/magpie/caller-keys.json",
         "max_chars": "24000",
+        "max_tokens": "8192",
         "temperature": "0",
         "timeout": "90",
     },

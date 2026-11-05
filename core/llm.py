@@ -199,6 +199,7 @@ class LLM:
         self.temperature = cfg["llm"].get("temperature", "0")
         self.timeout = float(cfg["llm"].get("timeout", "90") or 90)
         self.max_chars = int(cfg["llm"].get("max_chars", "24000") or 24000)
+        self.max_tokens = int(cfg["llm"].get("max_tokens", "8192") or 8192)
         self.key = load_key(cfg, log)
         self.log = log
         self.city = str((cfg.get("radar") or {}).get("city", "北京") or "北京").strip()
@@ -224,7 +225,7 @@ class LLM:
             "messages": ([{"role": "system", "content": system}] if system else [])
                         + [{"role": "user", "content": prompt}],
             "temperature": float(self.temperature or 0),
-            "max_tokens": 4096,
+            "max_tokens": self.max_tokens,
         }
         url = build_endpoint_url(self.base, "openai")
         status, body = self._post_url(url, payload, headers)
@@ -232,8 +233,12 @@ class LLM:
         choices = obj.get("choices") or []
         if not choices:
             raise RuntimeError("响应无 choices: %s" % body[:200])
-        msg = choices[0].get("message") or {}
-        return (msg.get("content") or ""), obj.get("model", self.model)
+        choice = choices[0]
+        msg = choice.get("message") or {}
+        content = msg.get("content") or ""
+        if choice.get("finish_reason") == "length" and not content:
+            raise RuntimeError("LLM 思考/生成耗尽上限 (finish_reason=length, max_tokens=%d)" % self.max_tokens)
+        return content, obj.get("model", self.model)
 
     def _call_anthropic(self, prompt, system):
         headers = {
@@ -242,7 +247,7 @@ class LLM:
         }
         payload = {
             "model": self.model,
-            "max_tokens": 8192,
+            "max_tokens": self.max_tokens,
             "temperature": float(self.temperature or 0),
             "messages": [{"role": "user", "content": prompt}],
         }
