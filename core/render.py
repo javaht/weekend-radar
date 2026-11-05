@@ -26,7 +26,9 @@ def _layout(events, groups, today, window_days, meta):
     """把事件切成报告需要的几块。两个渲染器共用, 保证分组口径一致。"""
     longrun = []
     for ev in events:
-        if ev.category == "C":
+        # 持续展出只针对 A 类（博物馆特展/画展艺术展/长档期漫展）。
+        # B 类技术活动（沙龙/峰会/Meetup）和 C 类博览会不作为画展对待，按命中的具体周末日程展示在 W1/W2 等分组中。
+        if ev.category in ("B", "C"):
             continue
         sd = meta["parse_date"](ev.start_date, today.year)
         ed = meta["parse_date"](ev.end_date, today.year) or sd
