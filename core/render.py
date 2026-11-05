@@ -483,6 +483,9 @@ def _md_push_diff(diff, meta):
         L.append("**❌ 取消 / 下架（%d）**" % len(diff["gone"]))
         L.append("")
         for row in diff["gone"]:
+            # row 是 sqlite3.Row(无 .get); markdown 报告版(_diff_lines)用下标访问, 这里统一转 dict
+            if not isinstance(row, dict):
+                row = dict(row)
             name = row.get("name") or "（未命名）"
             date = _t_date(row.get("start_date") or "—")
             line = "- **%s**\n  > 🕒 档期 %s ｜ ⚠️ 已从源平台下架或取消" % (name, date)
