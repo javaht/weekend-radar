@@ -323,15 +323,14 @@ class LLM:
             "规则:\n"
             "1) 只抽取页面中明确出现的信息, 绝不编造。看不到就填 null。\n"
             "2) 日期统一成 YYYY-MM-DD。未知填 null。\n"
-            "3) category: A=展会/漫展/市集/快闪/博物馆特展/画展艺术展(不收戏剧/话剧); B=AI/开源/开发者/技术沙龙; C=大中型博览会(B2B)。\n"
+            "3) category: A=展会/漫展/市集/快闪/博物馆特展/画展艺术展/音乐会/演唱会/舞蹈演出(不收戏剧/话剧); B=AI/开源/开发者/技术沙龙; C=大中型博览会(B2B)。\n"
             "4) is_free: 明确免费填 true; 有明确票价填 false; 不确定填 null。\n"
             "5) has_goods: 页面提到周边/集章/赠品/纸质证书/管饭才填 true, 否则 null。\n"
-            "6) i_friendly: 逛集/市集/展台交流/志愿者类场合填 true, 纯演讲论坛填 null。\n"
             "7) 每条必须有 name 和 start_date, 缺任一则丢弃该条。\n"
             "8) 只要中国%s的活动, 其他城市丢弃。\n"
             "输出格式: [{\"name\":\"\",\"start_date\":\"\",\"end_date\":null,\"venue\":null,"
             "\"price_text\":null,\"is_free\":null,\"category\":\"A\",\"url\":null,"
-            "\"deadline\":null,\"has_goods\":null,\"i_friendly\":null,\"note\":null}]"
+            "\"deadline\":null,\"has_goods\":null,\"note\":null}]"
         ) % self.city
         prompt = (
             "来源页面: %s\n今天: %s, 时间窗口截止: %s\n"

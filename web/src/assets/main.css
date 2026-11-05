@@ -1,0 +1,67 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  background-color: #ffffff;
+  color: #111111;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overflow-x: hidden;
+}
+
+/* 轻触反馈：仅做极轻微的位移，不做放大/发光 */
+.tactile-button {
+  transition: transform 0.15s cubic-bezier(0.22, 1, 0.36, 1), background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.tactile-button:active {
+  transform: scale(0.985);
+}
+
+@layer components {
+  /* 平面描边容器：替代原毛玻璃面板 */
+  .panel,
+  .glass-panel {
+    @apply rounded-2xl border border-hairline bg-surface;
+  }
+
+  /* 主按钮：黑底白字胶囊 */
+  .btn-primary {
+    @apply inline-flex items-center gap-2 rounded-full bg-ink px-4 py-2 text-xs font-semibold text-white transition-colors hover:bg-ink-soft disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  /* 次按钮：白底细描边胶囊 */
+  .btn-ghost {
+    @apply inline-flex items-center gap-2 rounded-full border border-hairline bg-surface px-4 py-2 text-xs font-medium text-muted transition-colors hover:border-ink/30 hover:text-ink disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  /* 表单控件 */
+  .field {
+    @apply w-full rounded-xl border border-hairline bg-surface px-3 py-2 text-xs text-ink outline-none transition-colors placeholder:text-muted-soft focus:border-ink/30 focus:ring-1 focus:ring-ink/10;
+  }
+}
+
+/* 极简浅色滚动条 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #e5e7eb;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #d1d5db;
+}

@@ -121,6 +121,11 @@ HTML 页面交给 LLM 提取，因为给 18 个站点各写一套选择器，等
 
 全部在 `config.ini`，无需命令行参数。
 
+> **敏感值请放 `config.local.ini`**（已被 `.gitignore` 忽略）。
+> 加载顺序是「内置默认值 → `config.ini` → `config.local.ini`」，后者最后覆盖，
+> 用来放真实 API Key、内网网关地址这类不能进公开仓库的值。
+> 仓库里的 `config.ini` 只留占位与注释。
+
 - `[sources]` 一行一个平台：`平台名 = 类|开关|入口URL`
   - `H` HTML（LLM 提取）、`J` JSON 接口、`S` 仅链接发现
   - 加平台 = 加一行 + 跑 `--probe` 校准，**不用改代码**

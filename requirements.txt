@@ -3,3 +3,8 @@
 # 不做浏览器自动化（Playwright/Selenium）：服务器上装 Chromium 是新增的故障面，
 # 而大麦和 B站都有可用的 JSON 接口，没必要为此付出代价。
 requests>=2.28
+
+# Web 控制台与 REST API 服务（--serve）
+fastapi>=0.110.0
+uvicorn>=0.28.0
+

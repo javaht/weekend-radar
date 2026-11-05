@@ -147,10 +147,6 @@ def _yes(v):
     return "★" if v else ""
 
 
-def _feels(v):
-    return "◆" if v else ""
-
-
 def _price(ev):
     if ev.is_free is True:
         return "**免费**"
@@ -177,7 +173,7 @@ def render(events, groups, today, window_days, diff, source_stats, meta):
     L.append("# %s周末活动雷达 · %s" % (city, today.strftime("%Y-%m-%d")))
     L.append("")
     L.append("> " + _header(today, window_days))
-    L.append("> 标注：★ 有实物（周边/集章/赠品/纸质证明/管饭）｜◆ i 人友好（事务性交流）")
+    L.append("> 标注：★ 有实物（周边/集章/赠品/纸质证明/管饭）")
     L.append("> 生成方式：%s" % meta.get("engine", ""))
     L.append("")
 
@@ -190,27 +186,27 @@ def render(events, groups, today, window_days, diff, source_stats, meta):
             L.append("_本周末无检索到符合条件的活动。_")
             L.append("")
             continue
-        L.append("| 日期 | 活动 | 地点 | 费用 | 实物★ | i人◆ | 报名截止⚠️ | 一句话看点 | 来源 |")
-        L.append("|---|---|---|---|---|---|---|---|---|")
+        L.append("| 日期 | 活动 | 地点 | 费用 | 实物★ | 报名截止⚠️ | 一句话看点 | 来源 |")
+        L.append("|---|---|---|---|---|---|---|---|")
         for ev in items:
-            L.append("| %s | %s | %s | %s | %s | %s | %s | %s | %s |" % (
+            L.append("| %s | %s | %s | %s | %s | %s | %s | %s |" % (
                 _md_cell(ev.start_date[5:] if ev.start_date else ""),
                 _md_cell(ev.name), _md_cell(ev.venue), _price(ev),
-                _yes(ev.has_goods), _feels(ev.i_friendly),
+                _yes(ev.has_goods),
                 _md_cell(ev.deadline), _md_cell(ev.note), _link(ev)))
         L.append("")
 
     if lay["longrun"]:
         L.append("## 持续展出中（这周末也能去，非周末限定）")
         L.append("")
-        L.append("| 展期 | 活动 | 地点 | 费用 | 实物★ | i人◆ | 来源 |")
+        L.append("| 展期 | 活动 | 地点 | 费用 | 实物★ | 来源 |")
         L.append("|---|---|---|---|---|---|---|")
         for ev in lay["longrun"]:
             span = "%s ~ %s" % (ev.start_date[5:], (ev.end_date or ev.start_date)[5:]) \
                 if ev.end_date and ev.end_date != ev.start_date else ev.start_date[5:]
-            L.append("| %s | %s | %s | %s | %s | %s | %s |" % (
+            L.append("| %s | %s | %s | %s | %s | %s |" % (
                 _md_cell(span), _md_cell(ev.name), _md_cell(ev.venue),
-                _price(ev), _yes(ev.has_goods), _feels(ev.i_friendly), _link(ev)))
+                _price(ev), _yes(ev.has_goods), _link(ev)))
         L.append("")
 
     if lay["unplaced"]:
@@ -304,7 +300,7 @@ def _t_event(ev, show_deadline=False):
     tail = _t_join([
         ev.venue,
         _t_price(ev),
-        (_yes(ev.has_goods) + _feels(ev.i_friendly)) or "",
+        _yes(ev.has_goods) or "",
         ("截止 " + _t_date(ev.deadline)) if (show_deadline and ev.deadline) else "",
         ev.note,
     ])
@@ -326,7 +322,7 @@ def render_text(events, groups, today, window_days, diff, source_stats, meta):
     L = []
     L.append("%s周末活动雷达 · %s" % (city, today.strftime("%Y-%m-%d")))
     L.append(_header(today, window_days))
-    L.append("标注：★ 有实物（周边/集章/赠品/纸质证明/管饭）｜◆ i 人友好（事务性交流）")
+    L.append("标注：★ 有实物（周边/集章/赠品/纸质证明/管饭）")
     L.append("")
 
     idx = 0
@@ -348,7 +344,7 @@ def render_text(events, groups, today, window_days, diff, source_stats, meta):
         for ev in lay["longrun"]:
             L.append(_t_join([_t_span(ev), ev.name], sep=" "))
             tail = _t_join([ev.venue, _t_price(ev),
-                            _yes(ev.has_goods) + _feels(ev.i_friendly)])
+                            _yes(ev.has_goods)])
             if tail:
                 L.append("    " + tail)
             if ev.url:
@@ -417,7 +413,7 @@ def render_text(events, groups, today, window_days, diff, source_stats, meta):
 def _md_push_event(ev, show_deadline=False, show_date=True, extra_note=None):
     """手机端 Markdown 卡片排版:
     - **[活动名](URL)**
-      > 📅 日期 ｜ 📍 场馆 ｜ 💰 票价 ｜ ★有实物 ｜ ◆i人友好 ｜ ⚠️截止 MM-DD ｜ 看点
+      > 📅 日期 ｜ 📍 场馆 ｜ 💰 票价 ｜ ★有实物 ｜ ⚠️截止 MM-DD ｜ 看点
     """
     title = "[%s](%s)" % (ev.name, ev.url) if ev.url else (ev.name or "（未命名）")
     tags = []
@@ -431,8 +427,6 @@ def _md_push_event(ev, show_deadline=False, show_date=True, extra_note=None):
         tags.append("💰 %s" % _t_price(ev))
     if ev.has_goods:
         tags.append("★有实物")
-    if ev.i_friendly:
-        tags.append("◆i人友好")
     if show_deadline and ev.deadline:
         tags.append("⚠️截止 %s" % _t_date(ev.deadline))
     note = extra_note or ev.note
@@ -511,7 +505,7 @@ def render_push_markdown(events, groups, today, window_days, diff, source_stats,
     L.append("# 🎯 %s周末活动雷达 · %s" % (city, today.strftime("%m-%d")))
     L.append("")
     L.append("> 📅 %s" % _header(today, window_days))
-    L.append("> 💡 标注：★ 有实物（周边/集章/赠品/纸质证明/管饭）｜◆ i 人友好（事务性交流）")
+    L.append("> 💡 标注：★ 有实物（周边/集章/赠品/纸质证明/管饭）")
     L.append("")
 
     # 截止提醒

@@ -31,8 +31,8 @@ class CsdnFeedSource:
     name = "csdnfeed"
     kind = "H"   # 需要 LLM, 属于 H 契约, 但发现逻辑特殊所以单独一个类
 
-    # 只翻第 1 页(≈最近两天, 40 条)。雷达每天跑, 不会漏; 想回溯更多改这里
-    LIST_PAGES = 1
+    # 翻前 3 页(≈最近 5~6 天, 120 条)，避免几天前发布的本周末活动因分页沉底漏掉
+    LIST_PAGES = 3
     BOT = "weixin_51159214"   # 「科技资讯」官方转载 bot
     SITE = "https://www.csdn.net"
 
@@ -45,6 +45,7 @@ class CsdnFeedSource:
         self.today = today
         self.window_end = window_end
         self.log = log
+        self.LIST_PAGES = int(cfg.get("csdnfeed_pages", 3) or 3)
         city = str(cfg.get("city", "") or "北京").strip()
         if len(city) > 2 and city.endswith("市"):
             city = city[:-1]

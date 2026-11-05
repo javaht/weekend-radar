@@ -28,6 +28,7 @@ from core.store import Store  # noqa: E402
 from core.render import render, render_text, render_push_markdown  # noqa: E402
 from core.push import send as push_send  # noqa: E402
 from core.models import Event, venue_same, price_anchor, configure_city  # noqa: E402
+from core.genre import genre_of, parse_disabled  # noqa: E402
 from core import timerange as TR  # noqa: E402
 from sources.base import SourceResult  # noqa: E402
 from sources.registry import build_sources  # noqa: E402
@@ -199,7 +200,7 @@ def _merge(events, log=print):
         for field in ("deadline", "note"):
             if not getattr(cur, field) and getattr(ev, field):
                 setattr(cur, field, getattr(ev, field))
-        for field in ("has_goods", "i_friendly"):
+        for field in ("has_goods",):
             if getattr(cur, field) is None and getattr(ev, field) is not None:
                 setattr(cur, field, getattr(ev, field))
 
@@ -338,6 +339,20 @@ def do_probe(cfg, src_rows):
     return EXIT_OK if fail_n == 0 else EXIT_FAIL
 
 
+def _genre_filtered_diff(diff, disabled):
+    """把 diff 里用户已关闭的品类剔掉, 只留下该触发推送的部分。"""
+    if not diff or not disabled:
+        return diff
+    def keep(ev):
+        return genre_of(ev.name, ev.category) not in disabled
+    return {
+        "new": [e for e in diff["new"] if keep(e)],
+        "changed": [c for c in diff["changed"] if keep(c["event"])],
+        "gone": [e for e in diff["gone"] if keep(Event(**e) if isinstance(e, dict) else e)],
+        "unchanged": diff["unchanged"],
+    }
+
+
 def _write_report(cfg, text, today):
     out_dir = abspath(cfg["radar"].get("out_dir", "data/reports"))
     os.makedirs(out_dir, exist_ok=True)
@@ -360,6 +375,12 @@ def _decide_push(cfg, stats, diff, events, today, force_push=False):
     """
     if force_push:
         return True, "手动强制推送 (--force-push)"
+
+    # ★ 品类开关: 用户在前端勾掉「脱口秀」, 那新增/变化/截止里的脱口秀就不该触发推送。
+    #   注意这只影响**推送判定**, 不影响入库 —— 页面上仍然能查到这些活动。
+    disabled = parse_disabled(cfg["push"].get("disabled_genres", ""))
+    diff = _genre_filtered_diff(diff, disabled) if disabled else diff
+    events = [e for e in events if genre_of(e.name, e.category) not in disabled] if disabled else events
 
     all_ok = all(s["ok"] for s in stats)
     min_new = as_int(cfg, "push", "min_new_changes", 3)
@@ -486,6 +507,18 @@ def do_install_cron(expr="0 9 * * *"):
     return EXIT_OK
 
 
+def do_serve(host="0.0.0.0", port=8000):
+    """启动 FastAPI Web 服务控制台。"""
+    try:
+        import uvicorn
+    except ImportError:
+        log("[!] 缺少 uvicorn 依赖，请运行: pip install fastapi uvicorn")
+        return EXIT_FAIL
+    log("启动 Web 服务控制台: http://%s:%d" % (host if host != "0.0.0.0" else "127.0.0.1", port))
+    uvicorn.run("server.app:app", host=host, port=port, reload=False)
+    return EXIT_OK
+
+
 def self_test():
     """离线自测: 不联网、不调模型、不需要配置（已抽离到 tests/test_offline.py）。"""
     from tests.test_offline import self_test as _do_self_test
@@ -503,8 +536,11 @@ def main():
                    help="逐源健康探测 + LLM 协议探测")
     g.add_argument("--self-test", action="store_true", help="离线自测，不联网")
     g.add_argument("--run", action="store_true", help="正式运行：入库存档+写报告+按需推送")
+    g.add_argument("--serve", action="store_true", help="启动 FastAPI Web 服务控制台")
     g.add_argument("--install-cron", action="store_true",
                    help="把每日 09:00 的定时任务写入 crontab（幂等）")
+    ap.add_argument("--port", type=int, default=8000, help="配合 --serve：Web 服务端口（默认 8000）")
+    ap.add_argument("--host", default="0.0.0.0", help="配合 --serve：绑定主机（默认 0.0.0.0）")
     ap.add_argument("--dry-run", action="store_true", help="配合 --run：全流程但不推送")
     ap.add_argument("--force-push", action="store_true", help="配合 --run：强制触发推送（忽略无实质变化与条数门槛）")
     ap.add_argument("--config", default=None, help="指定配置文件路径（默认 config.ini）")
@@ -521,6 +557,8 @@ def main():
         return self_test()
     if args.install_cron:
         return do_install_cron()
+    if args.serve:
+        return do_serve(host=args.host, port=args.port)
 
     cfg, src_rows = load_config(args.config)
     apply_env_and_city(cfg, src_rows, cli_overrides={
