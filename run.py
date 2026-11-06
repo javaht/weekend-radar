@@ -345,10 +345,16 @@ def _genre_filtered_diff(diff, disabled):
         return diff
     def keep(ev):
         return genre_of(ev.name, ev.category) not in disabled
+    def keep_row(e):
+        # diff["gone"] 是 dict(row)，带 id/status/fingerprint 等列，
+        # 不能 Event(**e)（实测抛 unexpected keyword argument 'id'）。
+        if isinstance(e, dict):
+            return genre_of(e.get("name") or "", e.get("category") or "A") not in disabled
+        return keep(e)
     return {
         "new": [e for e in diff["new"] if keep(e)],
         "changed": [c for c in diff["changed"] if keep(c["event"])],
-        "gone": [e for e in diff["gone"] if keep(Event(**e) if isinstance(e, dict) else e)],
+        "gone": [e for e in diff["gone"] if keep_row(e)],
         "unchanged": diff["unchanged"],
     }
 
@@ -507,14 +513,20 @@ def do_install_cron(expr="0 9 * * *"):
     return EXIT_OK
 
 
-def do_serve(host="0.0.0.0", port=8000):
-    """启动 FastAPI Web 服务控制台。"""
+def do_serve(host="127.0.0.1", port=8000):
+    """启动 FastAPI Web 服务控制台。
+
+    默认只绑 127.0.0.1：控制台有写配置/跑任务/发推送的接口，
+    没有任何登录态，直接绑 0.0.0.0 等于把内网端口公开出去。
+    确需对外时用 --host 0.0.0.0，并同时设置 RADAR_WRITE_TOKEN。
+    """
     try:
         import uvicorn
     except ImportError:
         log("[!] 缺少 uvicorn 依赖，请运行: pip install fastapi uvicorn")
         return EXIT_FAIL
-    log("启动 Web 服务控制台: http://%s:%d" % (host if host != "0.0.0.0" else "127.0.0.1", port))
+    os.environ["RADAR_SERVE_HOST"] = host
+    log("启动 Web 服务控制台: http://%s:%d" % ("127.0.0.1" if host == "0.0.0.0" else host, port))
     uvicorn.run("server.app:app", host=host, port=port, reload=False)
     return EXIT_OK
 
@@ -540,7 +552,8 @@ def main():
     g.add_argument("--install-cron", action="store_true",
                    help="把每日 09:00 的定时任务写入 crontab（幂等）")
     ap.add_argument("--port", type=int, default=8000, help="配合 --serve：Web 服务端口（默认 8000）")
-    ap.add_argument("--host", default="0.0.0.0", help="配合 --serve：绑定主机（默认 0.0.0.0）")
+    ap.add_argument("--host", default="127.0.0.1",
+                    help="配合 --serve：绑定主机（默认 127.0.0.1，仅本机可访问）")
     ap.add_argument("--dry-run", action="store_true", help="配合 --run：全流程但不推送")
     ap.add_argument("--force-push", action="store_true", help="配合 --run：强制触发推送（忽略无实质变化与条数门槛）")
     ap.add_argument("--config", default=None, help="指定配置文件路径（默认 config.ini）")

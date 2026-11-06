@@ -86,6 +86,10 @@ def list_events(
 @router.get("/events/grouped")
 def get_grouped_events(city: str = Query(None, description="指定城市")):
     cfg, _ = get_cfg(city)
+    # 库里数据是「配置城市」采集的，没有 city 列做物理隔离；
+    # 把真实采集城市回给前端，切到别的城市时明确提示，避免误导。
+    base_cfg, _ = get_cfg()
+    data_city = base_cfg["radar"].get("city", "北京")
     today = datetime.date.today()
     days = as_int(cfg, "radar", "window_days", 30)
     groups = TR.weekend_groups(today, days)
@@ -127,6 +131,7 @@ def get_grouped_events(city: str = Query(None, description="指定城市")):
 
         return {
             "city": meta["city"],
+            "data_city": data_city,
             "today": today.isoformat(),
             "window_days": days,
             "total_active": len(events),

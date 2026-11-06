@@ -3,13 +3,14 @@
 import asyncio
 import datetime
 from typing import Optional
-from fastapi import APIRouter, BackgroundTasks, HTTPException
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 import run
 from server.deps import task_lock, task_status, update_task_status, get_cfg
 from server.logger import bus_logger
+from server.auth import require_write
 from tools.probe import run_probe
 from tests.test_offline import self_test
 
@@ -29,6 +30,10 @@ class PlanTaskRequest(BaseModel):
 
 class ProbeTaskRequest(BaseModel):
     city: Optional[str] = None
+
+
+# 写操作必须过鉴权；日志流 / 状态是只读，单独放行（不挂在 router 级）
+WRITE_DEPS = [Depends(require_write)]
 
 
 @router.get("/status")
@@ -64,7 +69,7 @@ async def stream_logs():
     )
 
 
-@router.post("/logs/clear")
+@router.post("/logs/clear", dependencies=WRITE_DEPS)
 def clear_logs():
     bus_logger.clear_history()
     return {"ok": True}
@@ -118,7 +123,7 @@ async def _execute_plan_async(city: Optional[str]):
             update_task_status(False, result={"exit_code": -1, "error": str(e), "success": False})
 
 
-@router.post("/run")
+@router.post("/run", dependencies=WRITE_DEPS)
 async def trigger_run(req: RunTaskRequest, bg_tasks: BackgroundTasks):
     if task_lock.locked() or task_status["running"]:
         raise HTTPException(status_code=409, detail="已有正在运行的任务，请等待其完成")
@@ -126,7 +131,7 @@ async def trigger_run(req: RunTaskRequest, bg_tasks: BackgroundTasks):
     return {"message": "任务已触发", "city": req.city, "dry_run": req.dry_run, "force_push": req.force_push}
 
 
-@router.post("/plan")
+@router.post("/plan", dependencies=WRITE_DEPS)
 async def trigger_plan(req: PlanTaskRequest, bg_tasks: BackgroundTasks):
     if task_lock.locked() or task_status["running"]:
         raise HTTPException(status_code=409, detail="已有正在运行的任务，请等待其完成")
@@ -134,7 +139,7 @@ async def trigger_plan(req: PlanTaskRequest, bg_tasks: BackgroundTasks):
     return {"message": "Plan 试跑已触发", "city": req.city}
 
 
-@router.post("/probe")
+@router.post("/probe", dependencies=WRITE_DEPS)
 async def trigger_probe(req: ProbeTaskRequest):
     if task_lock.locked():
         raise HTTPException(status_code=409, detail="已有任务占用锁，请稍候")
@@ -166,7 +171,7 @@ async def trigger_probe(req: ProbeTaskRequest):
             run.log = orig_log
 
 
-@router.post("/self-test")
+@router.post("/self-test", dependencies=WRITE_DEPS)
 async def trigger_self_test():
     if task_lock.locked():
         raise HTTPException(status_code=409, detail="已有任务占用锁，请稍候")

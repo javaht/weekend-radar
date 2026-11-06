@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
 """推送通道测试与消息触发接口。"""
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
 
 from core.push import send as push_send, SUPPORTED_CHANNELS
 from server.deps import get_cfg
 from server.logger import bus_logger
+from server.auth import require_write
+from server.config_io import validate_url_value
 
 router = APIRouter(prefix="/api/push", tags=["push"])
 
@@ -25,12 +27,19 @@ def list_supported_channels():
     return {"channels": list(SUPPORTED_CHANNELS)}
 
 
-@router.post("/test")
+@router.post("/test", dependencies=[Depends(require_write)])
 def test_push_channel(req: PushTestRequest):
     cfg, _ = get_cfg()
     pcfg = {s: dict(kv) for s, kv in cfg.items()}
 
-    # 覆盖测试参数
+    # 覆盖测试参数：只允许 http(s) URL，挡掉把带 Bearer Key 的请求引到任意主机
+    for field in ("webhook",):
+        val = getattr(req, field, None)
+        if val:
+            try:
+                validate_url_value("push", field, val)
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
     pcfg["push"]["channel"] = req.channel
     if req.webhook:
         pcfg["push"]["webhook"] = req.webhook

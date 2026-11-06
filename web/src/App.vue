@@ -68,6 +68,8 @@ const currentViewComponent = computed(() => {
 })
 
 async function fetchStatus() {
+  // 页面不可见时不轮询，省掉后台标签页的无谓请求
+  if (document.hidden) return
   try {
     const s = await api.getStatus()
     taskStatus.value = s
@@ -96,7 +98,8 @@ let timer: number | null = null
 onMounted(() => {
   initPresets()
   fetchStatus()
-  timer = window.setInterval(fetchStatus, 3000)
+  // 3 秒轮询对「一天跑一次」的雷达没有意义，降到 10 秒
+  timer = window.setInterval(fetchStatus, 10000)
 })
 
 onUnmounted(() => {

@@ -1,8 +1,7 @@
 # -*- coding: utf-8 -*-
 """配置查看与在线修改、城市/模型预设字典。"""
-import configparser
 import os
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Dict, Any
 
@@ -11,6 +10,11 @@ from core.llm import PROVIDER_PRESETS
 from core.genre import GENRES, parse_disabled, dump_genres
 from core.models import PRICE_TIERS, PRICE_TIER_LABELS
 from server.deps import get_cfg
+from server.config_io import (
+    LOCAL_HEADER, mask_sections, replace_ini_lines,
+    split_changes, validate_url_value,
+)
+from server.auth import require_write
 
 router = APIRouter(prefix="/api", tags=["config"])
 
@@ -69,28 +73,18 @@ class GenrePrefsRequest(BaseModel):
     disabled: list[str] = []
 
 
-@router.put("/genres")
+@router.put("/genres", dependencies=[Depends(require_write)])
 def update_genres(req: GenrePrefsRequest):
     """只改 [push] disabled_genres 这一行，不碰其他配置。"""
-    from server.deps import get_cfg as _get_cfg
-    import configparser
-    ini_path = abspath("config.ini")
-    p = configparser.ConfigParser(interpolation=None)
-    if os.path.exists(ini_path):
-        p.read(ini_path, encoding="utf-8")
-    if not p.has_section("push"):
-        p.add_section("push")
     unknown = [g for g in req.disabled if g not in GENRES]
     if unknown:
         raise HTTPException(status_code=400, detail="未知品类: %s" % ", ".join(unknown))
-    p.set("push", "disabled_genres", dump_genres(set(req.disabled)))
-
-    tmp = ini_path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
-        p.write(f)
-    os.replace(tmp, ini_path)
-
-    cfg, _ = _get_cfg()
+    # ★ 不能用 configparser.write()：会抹掉全部注释并压缩 [sources] 空格
+    replace_ini_lines(
+        abspath("config.ini"),
+        {"push": {"disabled_genres": dump_genres(set(req.disabled))}},
+    )
+    cfg, _ = get_cfg()
     disabled = parse_disabled(cfg["push"].get("disabled_genres", ""))
     return {
         "message": "品类推送偏好已保存",
@@ -99,35 +93,65 @@ def update_genres(req: GenrePrefsRequest):
     }
 
 
-@router.get("/config")
-def get_config():
-    cfg, sources = get_cfg()
+def _config_payload(cfg, sources):
+    """GET 与 PUT 共用的返回结构，保证前端拿到的 sources 始终是未渲染模板。
+
+    ★ 若这里返回渲染后的 sources（占位符已替换成当前城市），前端回填后
+      下一次自动保存就会把模板永久固化，13 城联动直接失效。
+    """
+    sections = mask_sections(cfg)
+    # extra.city 是运行时派生的城市镜像，不是磁盘配置项
+    sections.get("extra", {}).pop("city", None)
     return {
-        "sections": cfg,
-        "sources": sources,
+        "sections": sections,
+        "sources": dict(getattr(sources, "templates", None) or sources),
     }
 
 
-@router.put("/config")
-def update_config(req: UpdateConfigRequest):
-    """在线修改 config.ini —— 原地改值, 不重写整个文件。
+@router.get("/config")
+def get_config():
+    cfg, sources = get_cfg()
+    return {"message": "ok", **_config_payload(cfg, sources)}
 
-    ★ 为什么不用 configparser 的 write():
-      它会丢掉全部注释, 且把 [sources] 里的 "H|on |url" 值里的空格吃掉。
-      这个文件里有大量说明性注释(占 78 行), 一次网页保存就全没了。
-      所以这里改成逐行替换: 只改目标键的值, 其余行原样保留。
+
+@router.get("/config/secret", dependencies=[Depends(require_write)])
+def reveal_secret(section: str = "llm", key: str = "key"):
+    """显式读取单个密钥字段的真实值，供设置页「显示」按钮使用。
+
+    GET /config 一律掩码，但用户点「显示」时确实需要看到自己配的值。
+    这是独立且受写保护的接口，避免为了一个显示动作把整份配置明文化。
+    """
+    cfg, _ = get_cfg()
+    val = str((cfg.get(section) or {}).get(key, "") or "")
+    if not val:
+        return {"value": "", "configured": False}
+    return {"value": val, "configured": True}
+
+
+@router.put("/config", dependencies=[Depends(require_write)])
+def update_config(req: UpdateConfigRequest):
+    """在线修改配置 —— 原地逐行改值，保留注释与格式。
+
+    ★ 两个关键约束：
+      - 私有值（真实 Key / 内网网关 / 各渠道密钥）只写 config.local.ini，
+        绝不写回被 git 跟踪的 config.ini；前端回填的 "***" 表示未修改，跳过。
+      - 不用 configparser.write()，否则一次网页保存就毁掉 83 行注释。
     """
     ini_path = abspath("config.ini")
     if not os.path.exists(ini_path):
         raise HTTPException(status_code=500, detail="config.ini 不存在")
+    local_path = os.path.splitext(ini_path)[0] + ".local.ini"
 
-    # 把要改的键收集成 {section: {key: value}}
     changes = {}
     for sec_name, kv in (req.sections or {}).items():
         if sec_name == "sources":
             continue
         sec = changes.setdefault(sec_name, {})
         for k, v in kv.items():
+            # extra.city 是运行时派生的城市镜像，不是磁盘配置项；
+            # 写回去会在 [extra] 多出一行 city，且随每次切城市被改。
+            if sec_name == "extra" and k == "city":
+                continue
             if v is not None:
                 sec[k] = str(v)
     if req.sources is not None:
@@ -136,81 +160,24 @@ def update_config(req: UpdateConfigRequest):
             if v is not None:
                 sec[k] = str(v)
 
-    with open(ini_path, "r", encoding="utf-8") as f:
-        lines = f.readlines()
+    # 校验 URL 类字段（挡 file://、javascript: 等非 http 协议）
+    for sec_name, kv in changes.items():
+        for k, v in kv.items():
+            try:
+                validate_url_value(sec_name, k, v)
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
 
-    current_sec = None
-    seen = {s: set() for s in changes}   # 每个段里已改到哪些键
-    out = []
-    for raw in lines:
-        stripped = raw.strip()
-        # 段头
-        if stripped.startswith("[") and stripped.endswith("]"):
-            current_sec = stripped[1:-1]
-            out.append(raw)
-            continue
-        # 注释/空行原样保留
-        if not stripped or stripped.startswith("#") or stripped.startswith(";"):
-            out.append(raw)
-            continue
-        if "=" not in raw or current_sec is None:
-            out.append(raw)
-            continue
-        key = raw.split("=", 1)[0].strip()
-        if current_sec in changes and key in changes[current_sec]:
-            val = changes[current_sec][key]
-            # 保留行尾注释: "key = value  # 说明"
-            tail = ""
-            if "#" in raw and not raw.strip().startswith("#"):
-                head, tail = raw.split("#", 1)
-                # [sources] 的 URL 里不会有 #, 但保险起见只对非 sources 段保留行尾注释
-                if current_sec == "sources":
-                    tail = ""
-                else:
-                    tail = "  #" + tail.rstrip("\n")
-            out.append("%s = %s%s\n" % (key, val, tail))
-            seen[current_sec].add(key)
-            continue
-        out.append(raw)
-
-    # 新键(原文件里没有的)追加到对应段末尾
-    for sec, kv in changes.items():
-        missing = [k for k in kv if k not in seen[sec]]
-        if not missing:
-            continue
-        appended = False
-        for i, raw in enumerate(out):
-            if raw.strip() == "[%s]" % sec:
-                # 找到该段的最后一行内容位置
-                j = i + 1
-                last = i
-                while j < len(out) and not out[j].strip().startswith("["):
-                    if out[j].strip() and not out[j].strip().startswith("#"):
-                        last = j
-                    j += 1
-                for k in missing:
-                    out.insert(last + 1, "%s = %s\n" % (k, kv[k]))
-                    last += 1
-                appended = True
-                break
-        if not appended:
-            out.append("\n[%s]\n" % sec)
-            for k in missing:
-                out.append("%s = %s\n" % (k, kv[k]))
-
-    tmp_path = ini_path + ".tmp"
+    public, private = split_changes(changes, ini_path)
     try:
-        with open(tmp_path, "w", encoding="utf-8") as f:
-            f.writelines(out)
-        os.replace(tmp_path, ini_path)
+        replace_ini_lines(ini_path, public)
+        if private:
+            replace_ini_lines(local_path, private, create_header=LOCAL_HEADER)
     except Exception as e:
-        if os.path.exists(tmp_path):
-            os.remove(tmp_path)
-        raise HTTPException(status_code=500, detail=f"写入 config.ini 失败: {e}")
+        raise HTTPException(status_code=500, detail="写入配置失败: %s" % e)
 
     new_cfg, new_sources = get_cfg()
     return {
         "message": "配置更新成功",
-        "sections": new_cfg,
-        "sources": new_sources,
+        **_config_payload(new_cfg, new_sources),
     }

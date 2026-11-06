@@ -21,6 +21,9 @@
         <p class="mt-1 text-[13px] leading-relaxed text-muted">
           {{ summaryLine }}
         </p>
+        <p v-if="data?.data_city && data.city !== data.data_city" class="mt-1 text-[12px] text-accent-amber">
+          当前库内为「{{ data.data_city }}」采集的数据；切换到 {{ data.city }} 后需以该城市执行一次任务才会更新清单。
+        </p>
       </div>
     </div>
 
@@ -314,16 +317,32 @@ watch(() => props.city, () => {
   loadData()
 })
 
-onMounted(() => {
+// 目录类是静态数据，只拉一次；首屏 onMounted 与 onActivated 都会触发，
+// 用标志位去重，避免 KeepAlive 下重复请求。
+let catalogLoaded = false
+let dataLoaded = false
+
+function loadCatalogOnce() {
+  if (catalogLoaded) return
+  catalogLoaded = true
   loadGenres()
   loadPriceTiers()
+}
+
+function loadDataOnce() {
+  if (dataLoaded) return
+  dataLoaded = true
   loadData()
+}
+
+onMounted(() => {
+  loadCatalogOnce()
+  loadDataOnce()
 })
 
 onActivated(() => {
-  loadGenres()
-  loadPriceTiers()
-  loadData()
+  loadCatalogOnce()
+  loadDataOnce()
 })
 
 // 扁平统计
@@ -362,7 +381,7 @@ const subTabs = computed(() => {
     tabs.push({ id: 'expo', label: '博览会速览', count: data.value.expo.length, items: data.value.expo, kind: 'expo' })
   }
   if (data.value.urgent.length > 0) {
-    tabs.push({ id: 'urgent', label: '临近截止', count: data.value.urgent.length, items: data.value.urgent.map(u => u.event), kind: 'urgent' })
+    tabs.push({ id: 'urgent', label: '临近截止', count: data.value.urgent.length, items: data.value.urgent, kind: 'urgent' })
   }
   return tabs
 })

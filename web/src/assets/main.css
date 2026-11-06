@@ -48,6 +48,23 @@ body {
   .field {
     @apply w-full rounded-xl border border-hairline bg-surface px-3 py-2 text-xs text-ink outline-none transition-colors placeholder:text-muted-soft focus:border-ink/30 focus:ring-1 focus:ring-ink/10;
   }
+
+  /* 表单标签：固定两行高度 + 底部间距，保证同排各字段的输入框顶部对齐。
+     长标签（如「新增触发门槛 (min_new_changes)」）折行时不再把输入框往下推。 */
+  .field-label {
+    @apply mb-1.5 flex h-[34px] items-end text-[12px] font-medium leading-tight text-muted;
+  }
+}
+
+/* 自动保存的瞬时反馈：轻轻淡入，0.9 秒后淡出 */
+.save-flash-enter-active,
+.save-flash-leave-active {
+  transition: opacity 0.18s ease, transform 0.18s ease;
+}
+.save-flash-enter-from,
+.save-flash-leave-to {
+  opacity: 0;
+  transform: translateY(-3px);
 }
 
 /* 极简浅色滚动条 */

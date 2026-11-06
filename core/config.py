@@ -257,6 +257,19 @@ DEFAULTS = {
 }
 
 
+class SourceRows(dict):
+    """[sources] 行容器，附带一份「未渲染」的原始模板。
+
+    apply_env_and_city 每次都从 templates 重新渲染，而不是在已渲染结果上叠加，
+    否则 --city / Web 切城市时第二次替换找不到 {douban_city} 这类占位符，
+    URL 会永远停留在上一次的城市（实测 --city 上海仍抓 /city/beijing）。
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.templates = {}
+
+
 def load_config(path=None):
     """返回 (cfg, sources)。cfg 是带默认值的三层 dict, sources 是原始行 dict。
 
@@ -266,7 +279,7 @@ def load_config(path=None):
     """
     path = path or CONFIG_FILE
     cfg = {s: dict(kv) for s, kv in DEFAULTS.items()}
-    sources = {}
+    sources = SourceRows()
     if not os.path.exists(path):
         return cfg, sources
 
@@ -294,7 +307,10 @@ def load_config(path=None):
                     cfg[section][key] = val
         if p.has_section("sources"):
             for key, val in p.items("sources"):
-                sources[key] = (val or "").strip()
+                raw = (val or "").strip()
+                sources[key] = raw
+                # 保留未渲染模板，供后续 --city / 切城市重新渲染
+                sources.templates[key] = raw
     apply_env_and_city(cfg, sources)
     return cfg, sources
 
@@ -392,7 +408,11 @@ def apply_env_and_city(cfg, sources, cli_overrides=None):
             cfg["extra"]["expo090_article"] = ""
 
     # 渲染或替换 [sources] 里的城市占位符与北京默认 URL
-    if sources:
+    # ★ 每次都从「未渲染模板」重新生成，不能在上一轮已替换的结果上再替换。
+    #   sources 可能是普通 dict（测试/外部调用），此时退回用当前值当模板。
+    templates = getattr(sources, "templates", None)
+    base = dict(templates) if templates else dict(sources)
+    if base:
         tpl_vars = {
             "city": city,
             "city_url": city_url,
@@ -401,13 +421,16 @@ def apply_env_and_city(cfg, sources, cli_overrides=None):
             "artron_code": preset.get("artron_code") or ("0-%s" % city_url),
             "datexpo_code": DATEXPO_CITY_CODES.get(city, "1_1_0_0_0"),
         }
-        for sname, raw_row in list(sources.items()):
+        rendered = {}
+        for sname, raw_row in list(base.items()):
             sname_low = sname.strip().lower()
             # 非北京城市自动关闭北京专属场馆源（国博/国家大剧院/国家会议中心）
             if city != "北京" and sname_low in BEIJING_ONLY_SOURCES:
                 parsed = parse_source_row(raw_row)
                 if parsed and parsed["enabled"]:
-                    sources[sname] = "%s|off|%s" % (parsed["kind"], parsed["url"])
+                    rendered[sname] = "%s|off|%s" % (parsed["kind"], parsed["url"])
+                else:
+                    rendered[sname] = raw_row
                 continue
 
             new_row = raw_row
@@ -415,14 +438,22 @@ def apply_env_and_city(cfg, sources, cli_overrides=None):
                 new_row = new_row.replace("{" + k + "}", v)
 
             if city != "北京":
+                # 兼容手工写死北京 URL 的旧配置（模板里没有占位符）
                 new_row = new_row.replace("city=%E5%8C%97%E4%BA%AC", "city=%s" % city_url)
                 new_row = new_row.replace("1-%E5%8C%97%E4%BA%AC-0", "%s-0" % tpl_vars["artron_code"])
                 if preset.get("bendibao_city"):
                     new_row = new_row.replace("m.bj.bendibao.com", "m.%s.bendibao.com" % preset["bendibao_city"])
                 if preset.get("douban_city"):
                     new_row = new_row.replace("beijing.douban.com", "%s.douban.com" % preset["douban_city"])
+                    new_row = new_row.replace("/city/beijing", "/city/%s" % preset["douban_city"])
+                    new_row = new_row.replace("/event/beijing", "/event/%s" % preset["douban_city"])
                     new_row = new_row.replace("/beijing/", "/%s/" % preset["douban_city"])
-            sources[sname] = new_row
+            rendered[sname] = new_row
+        sources.clear()
+        sources.update(rendered)
+        if templates is not None:
+            templates.clear()
+            templates.update(base)
 
 
 def as_int(cfg, section, key, fallback):

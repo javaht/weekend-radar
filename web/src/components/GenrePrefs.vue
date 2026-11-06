@@ -5,18 +5,11 @@
         <h2 class="text-[16px] font-semibold tracking-tight text-ink">推送品类偏好</h2>
         <p class="mt-1 text-[12px] text-muted">
           勾选你关心的品类。取消勾选的品类仍会正常入库并在「活动情报」页展示，
-          只是不再计入推送判定，避免被不感兴趣的活动打扰。
+          只是不再计入推送判定，避免被不感兴趣的活动打扰。修改后自动保存。
         </p>
       </div>
-      <button
-        @click="savePrefs"
-        :disabled="saving || !dirty"
-        class="btn-primary shrink-0"
-      >
-        <span v-if="saving">保存中…</span>
-        <span v-else-if="!dirty">已保存</span>
-        <span v-else>保存偏好</span>
-      </button>
+
+      <span class="shrink-0 text-[11px] text-muted-soft">修改自动保存</span>
     </div>
 
     <div v-if="loading" class="py-8 text-center text-[12px] text-muted-soft">正在读取品类偏好…</div>
@@ -52,36 +45,46 @@
       </span>
     </div>
 
-    <p v-if="message" class="text-[12px]" :class="messageOk ? 'text-accent-green' : 'text-accent'">
-      {{ message }}
-    </p>
+    <SaveFlash :state="saveFlash" />
   </section>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { api, type GenrePref } from '../api/client'
+import SaveFlash from './SaveFlash.vue'
 
 const genres = ref<GenrePref[]>([])
 const loading = ref(false)
-const saving = ref(false)
-const dirty = ref(false)
-const message = ref('')
-const messageOk = ref(true)
+const saveFlash = ref('')   // '' | 'ok' | 'error'
+let saveTimer: number | null = null
+let flashTimer: number | null = null
+// 基线：加载与保存回填不应触发自动保存
+let baseline = ''
+let suspendBaselineSync = false
 
 const enabledCount = computed(() => genres.value.filter(g => g.enabled).length)
+const stateKey = () => genres.value.map(g => g.enabled).join(',')
+
+function flash(kind: 'ok' | 'error') {
+  saveFlash.value = kind
+  if (flashTimer) clearTimeout(flashTimer)
+  flashTimer = window.setTimeout(() => { saveFlash.value = '' }, kind === 'ok' ? 600 : 2000)
+}
 
 async function load() {
   loading.value = true
+  suspendBaselineSync = true
   try {
     const res = await api.getGenres()
     genres.value = res.genres
-    dirty.value = false
   } catch (e: any) {
-    message.value = `读取失败: ${e.message}`
-    messageOk.value = false
+    saveFlash.value = 'error'
+    flashTimer = window.setTimeout(() => { saveFlash.value = '' }, 2000)
   } finally {
+    baseline = stateKey()
     loading.value = false
+    suspendBaselineSync = false
   }
 }
 
@@ -89,33 +92,39 @@ function toggle(id: string) {
   const g = genres.value.find(x => x.id === id)
   if (!g) return
   g.enabled = !g.enabled
-  dirty.value = true
-  message.value = ''
 }
 
 function setAll(on: boolean) {
   genres.value.forEach(g => { g.enabled = on })
-  dirty.value = true
-  message.value = ''
 }
 
 async function savePrefs() {
-  saving.value = true
-  message.value = ''
   try {
     const disabled = genres.value.filter(g => !g.enabled).map(g => g.id)
     const res = await api.updateGenres(disabled)
+    suspendBaselineSync = true
     genres.value = res.genres
-    dirty.value = false
-    message.value = res.message
-    messageOk.value = true
+    baseline = stateKey()
+    suspendBaselineSync = false
+    flash('ok')
   } catch (e: any) {
-    message.value = `保存失败: ${e.message}`
-    messageOk.value = false
-  } finally {
-    saving.value = false
+    suspendBaselineSync = false
+    saveFlash.value = 'error'
+    flashTimer = window.setTimeout(() => { saveFlash.value = '' }, 2000)
   }
 }
 
+// 勾选/全选后 debounce 500ms 自动保存
+watch(stateKey, () => {
+  if (suspendBaselineSync || stateKey() === baseline) return
+  if (saveTimer) clearTimeout(saveTimer)
+  saveTimer = window.setTimeout(savePrefs, 500)
+})
+
 onMounted(load)
+
+onUnmounted(() => {
+  if (saveTimer) clearTimeout(saveTimer)
+  if (flashTimer) clearTimeout(flashTimer)
+})
 </script>

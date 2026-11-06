@@ -11,26 +11,39 @@ if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
 from core.config import abspath
-from server.routers import events, radar, config, push
+from server.routers import events, radar, config, push, llm
+from server.logger import bus_logger
+from server.auth import allowed_origins
 
 app = FastAPI(
-    title="Weekend Radar API",
+    title="Weekend Radar Api",
     description="多城市线下活动情报与差分引擎 Web 控制台",
     version="1.0.0",
 )
 
+# CORS：服务默认只绑 127.0.0.1，这里也只放行本机来源；
+# 绝不配 allow_origins=["*"] + allow_credentials=True（会把任意站点回显成可信来源）。
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=allowed_origins(),
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+async def _on_startup():
+    # run_in_executor 里的任务在工作线程打日志，需要主 loop 才能线程安全地投递到 SSE 队列
+    import asyncio
+    bus_logger.set_loop(asyncio.get_running_loop())
+
 
 app.include_router(events.router)
 app.include_router(radar.router)
 app.include_router(config.router)
 app.include_router(push.router)
+app.include_router(llm.router)
 
 
 @app.get("/api/health")

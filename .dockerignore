@@ -3,6 +3,9 @@ __pycache__/
 .git/
 .gitignore
 .DS_Store
+# 私有密钥绝不能进镜像层：.gitignore 只管 git，管不到 docker build context
+config.local.ini
+web/node_modules/
 data/*.sqlite*
 data/*.log
 data/reports/*.md

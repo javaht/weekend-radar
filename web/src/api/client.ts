@@ -30,14 +30,23 @@ export interface WeekendGroup {
 
 export interface GroupedEventsResponse {
   city: string
+  data_city?: string
   today: string
   window_days: number
   total_active: number
   weekends: WeekendGroup[]
   longrun: EventItem[]
   expo: EventItem[]
-  urgent: Array<{ days_left: number; event: EventItem }>
+  urgent: EventItem[]
   unplaced: EventItem[]
+}
+
+export interface ModelListResponse {
+  ok: boolean
+  models: string[]
+  count: number
+  current: string
+  note: string
 }
 
 export interface TaskStatus {
@@ -113,6 +122,13 @@ export const api = {
   getReports: () => request<{ reports: any[] }>('/api/reports'),
   getReportContent: (date: string) => request<{ date: string; content: string }>(`/api/reports/${date}`),
   getConfig: () => request<{ sections: Record<string, any>; sources: Record<string, string> }>('/api/config'),
+  revealSecret: (section = 'llm', key = 'key') =>
+    request<{ value: string; configured: boolean }>(`/api/config/secret?section=${section}&key=${key}`),
+  fetchModels: (payload: { base_url?: string; key?: string; mode?: string; provider?: string }) =>
+    request<ModelListResponse>('/api/llm/models', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
   updateConfig: (sections: Record<string, any>, sources?: Record<string, string>) =>
     request<any>('/api/config', {
       method: 'PUT',

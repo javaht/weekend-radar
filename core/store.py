@@ -14,6 +14,7 @@ import datetime
 import json
 import os
 import sqlite3
+import threading
 
 from core.models import venue_same, price_anchor, price_tier as price_tier_of
 
@@ -59,6 +60,11 @@ CREATE TABLE IF NOT EXISTS runs(
 );
 """
 
+# 每个 SQLite 文件只跑一次 DDL。Web 的 /events、/grouped、/stats、/runs
+# 每次请求都 new Store()，原先会重复 executescript + 4 个吞异常 ALTER。
+_initialized_paths = set()
+_init_lock = threading.Lock()
+
 
 def _tri(v):
     return None if v is None else (1 if v else 0)
@@ -89,16 +95,23 @@ class Store:
             os.makedirs(d, exist_ok=True)
         self.conn = sqlite3.connect(path)
         self.conn.row_factory = sqlite3.Row
-        self.conn.executescript(SCHEMA)
-        for col in ("miss_count INTEGER DEFAULT 0",
-                    "key_chg_count INTEGER DEFAULT 0",
-                    "pending_fp TEXT",
-                    "sources TEXT"):
-            try:
-                self.conn.execute("ALTER TABLE events ADD COLUMN " + col)
-            except Exception:
-                pass
-        self.conn.commit()
+        self._ensure_schema()
+
+    def _ensure_schema(self):
+        with _init_lock:
+            if self.path in _initialized_paths:
+                return
+            self.conn.executescript(SCHEMA)
+            for col in ("miss_count INTEGER DEFAULT 0",
+                        "key_chg_count INTEGER DEFAULT 0",
+                        "pending_fp TEXT",
+                        "sources TEXT"):
+                try:
+                    self.conn.execute("ALTER TABLE events ADD COLUMN " + col)
+                except Exception:
+                    pass
+            self.conn.commit()
+            _initialized_paths.add(self.path)
 
     def close(self):
         try:
