@@ -49,18 +49,32 @@ def test_push_channel(req: PushTestRequest):
             pcfg["push"]["wecom_webhook"] = req.webhook
         elif req.channel == "dingtalk":
             pcfg["push"]["dingtalk_webhook"] = req.webhook
-    if req.secret:
-        pcfg["push"]["secret"] = req.secret
+        elif req.channel == "pushdeer":
+            pcfg["push"]["endpoint"] = req.webhook
+        elif req.channel == "bark":
+            pcfg["push"]["bark_url"] = req.webhook
+
+    key_val = (req.pushkey or req.secret or "").strip()
+    if key_val:
+        pcfg["push"]["secret"] = key_val
+        pcfg["push"]["pushkey"] = key_val
         if req.channel == "feishu":
-            pcfg["push"]["feishu_secret"] = req.secret
+            pcfg["push"]["feishu_secret"] = key_val
         elif req.channel == "dingtalk":
-            pcfg["push"]["dingtalk_secret"] = req.secret
-    if req.pushkey:
-        pcfg["push"]["pushkey"] = req.pushkey
-        if req.channel == "bark":
-            pcfg["push"]["bark_key"] = req.pushkey
+            pcfg["push"]["dingtalk_secret"] = key_val
+        elif req.channel == "wecom":
+            pcfg["push"]["wecom_key"] = key_val
+        elif req.channel == "pushdeer":
+            pcfg["push"]["pushkey"] = key_val
+        elif req.channel == "bark":
+            pcfg["push"]["bark_key"] = key_val
         elif req.channel == "serverchan":
-            pcfg["push"]["serverchan_sendkey"] = req.pushkey
+            pcfg["push"]["serverchan_sendkey"] = key_val
+        elif req.channel == "telegram":
+            if key_val.isdigit() or key_val.startswith("@") or key_val.startswith("-"):
+                pcfg["push"]["telegram_chat_id"] = key_val
+            else:
+                pcfg["push"]["telegram_bot_token"] = key_val
 
     bus_logger.log(f"触发通道测试: {req.channel}")
     res = push_send(pcfg, req.title, req.body, log=bus_logger.log)
