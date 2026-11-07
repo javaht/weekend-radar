@@ -11,6 +11,7 @@
   单页失败返回 FetchResult(ok=False), 不抛异常 —— 抛异常表示不可恢复。
 """
 import random
+import re
 import time
 import urllib.parse
 
@@ -39,7 +40,14 @@ BAN_MARKERS = (
     "哎呀，访问太快",        # 活动行限流页标题
     "请完成安全验证",
     "滑动验证",
+    "网站防火墙",            # 万展网/第一展会网 WAF 限流页
+    "请求过于频繁",
 )
+
+# 「会话握手」页: 服务端先回一个只有跳转脚本的空壳, 把 Session Cookie 种进浏览器,
+# 再跳回原地址给真实内容。这不是反爬, 是很多国产站点(今日会展/万展网等)的通用
+# 会话初始化。纯 HTTP 客户端照做即可, 完全不需要用户登录或扫码。
+_HANDSHAKE_RE = re.compile(r"WebShieldSessionVerify=([\w-]+)")
 
 
 def _looks_blocked(text):
@@ -154,6 +162,23 @@ class Fetcher:
                 #   头里明确给了 charset 就信它, 不再跑较慢的 apparent_encoding。
                 if not r.encoding or r.encoding.lower() == "iso-8859-1":
                     r.encoding = r.apparent_encoding or r.encoding
+                # ★ 会话握手页: 服务端只回一个跳转脚本(约 400 字节), 带 WebShieldSessionVerify。
+                #   它不直接种 Cookie, 而是先要访问站点根拿到 ASPSESSIONID, 之后原地址才给
+                #   真实正文。有的站要握 1 轮, 有的要 2 轮, 所以最多重试 3 次。
+                #   这不是登录, 也不需要扫码 —— 之前判为「正文过短/需登录」是误判。
+                for _hs in range(3):
+                    m = _HANDSHAKE_RE.search(r.text or "")
+                    if not (m and len(r.text or "") < 2000):
+                        break
+                    pp = urllib.parse.urlparse(target)
+                    self._sess().get("%s://%s/" % (pp.scheme, pp.netloc),
+                                     headers=hdrs, timeout=self.timeout)
+                    self.calls += 1
+                    r = self._sess().get(target, params=params, headers=hdrs,
+                                         timeout=self.timeout)
+                    self.calls += 1
+                    if not r.encoding or r.encoding.lower() == "iso-8859-1":
+                        r.encoding = r.apparent_encoding or r.encoding
                 if _looks_blocked(r.text):
                     return FetchResult(False, 200, r.text, target,
                                        "反爬拦截（命中验证页，需 cookie 或换 IP）", elapsed)

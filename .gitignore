@@ -8,3 +8,7 @@ data/reports/*.md
 tests/_selftest*
 .env
 config.local.ini
+web/node_modules/
+# 前端构建产物：由 `cd web && npm run build` 生成，不入库
+web/dist/
+

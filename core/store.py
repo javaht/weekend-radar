@@ -14,8 +14,9 @@ import datetime
 import json
 import os
 import sqlite3
+import threading
 
-from core.models import venue_same, price_anchor
+from core.models import venue_same, price_anchor, price_tier as price_tier_of
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS events(
@@ -32,7 +33,6 @@ CREATE TABLE IF NOT EXISTS events(
   source      TEXT,
   deadline    TEXT,
   has_goods   INTEGER,
-  i_friendly  INTEGER,
   note        TEXT,
   fingerprint TEXT NOT NULL,
   first_seen  TEXT,
@@ -60,9 +60,21 @@ CREATE TABLE IF NOT EXISTS runs(
 );
 """
 
+# 每个 SQLite 文件只跑一次 DDL。Web 的 /events、/grouped、/stats、/runs
+# 每次请求都 new Store()，原先会重复 executescript + 4 个吞异常 ALTER。
+_initialized_paths = set()
+_init_lock = threading.Lock()
+
 
 def _tri(v):
     return None if v is None else (1 if v else 0)
+
+
+def _tri_in(v):
+    """DB 里的 0/1/NULL 还原成 Python 三态，供派生计算用。"""
+    if v is None:
+        return None
+    return True if v == 1 else False
 
 
 class Store:
@@ -83,16 +95,23 @@ class Store:
             os.makedirs(d, exist_ok=True)
         self.conn = sqlite3.connect(path)
         self.conn.row_factory = sqlite3.Row
-        self.conn.executescript(SCHEMA)
-        for col in ("miss_count INTEGER DEFAULT 0",
-                    "key_chg_count INTEGER DEFAULT 0",
-                    "pending_fp TEXT",
-                    "sources TEXT"):
-            try:
-                self.conn.execute("ALTER TABLE events ADD COLUMN " + col)
-            except Exception:
-                pass
-        self.conn.commit()
+        self._ensure_schema()
+
+    def _ensure_schema(self):
+        with _init_lock:
+            if self.path in _initialized_paths:
+                return
+            self.conn.executescript(SCHEMA)
+            for col in ("miss_count INTEGER DEFAULT 0",
+                        "key_chg_count INTEGER DEFAULT 0",
+                        "pending_fp TEXT",
+                        "sources TEXT"):
+                try:
+                    self.conn.execute("ALTER TABLE events ADD COLUMN " + col)
+                except Exception:
+                    pass
+            self.conn.commit()
+            _initialized_paths.add(self.path)
 
     def close(self):
         try:
@@ -174,13 +193,13 @@ class Store:
         self.conn.execute(
             "INSERT INTO events"
             "(name,name_norm,start_date,end_date,venue,price_text,is_free,"
-            " category,url,source,sources,deadline,has_goods,i_friendly,note,"
+            " category,url,source,sources,deadline,has_goods,note,"
             " fingerprint,first_seen,last_seen,status)"
-            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active')",
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active')",
             (ev.name, ev.name_norm, ev.start_date, ev.end_date, ev.venue,
              ev.price_text, _tri(ev.is_free), ev.category, ev.url, ev.source,
              self._sources_of(ev), ev.deadline, _tri(ev.has_goods),
-             _tri(ev.i_friendly), ev.note, ev.fingerprint, today_iso, today_iso))
+             ev.note, ev.fingerprint, today_iso, today_iso))
 
     def apply(self, events, today_iso, all_sources_ok, source_stats):
         """把本轮结果并入库, 返回差分报告。
@@ -292,13 +311,13 @@ class Store:
         self.conn.execute(
             "UPDATE events SET name=?,name_norm=?,start_date=?,end_date=?,"
             "venue=?,price_text=?,is_free=?,category=?,url=?,source=?,sources=?,"
-            "deadline=?,has_goods=?,i_friendly=?,note=?,fingerprint=?,"
+            "deadline=?,has_goods=?,note=?,fingerprint=?,"
             "last_seen=?,status='active',miss_count=0,key_chg_count=?,"
             "pending_fp=NULL WHERE id=?",
             (ev.name, ev.name_norm, ev.start_date, ev.end_date, ev.venue,
              ev.price_text, _tri(ev.is_free), ev.category, ev.url, ev.source,
              self._sources_of(ev), ev.deadline, _tri(ev.has_goods),
-             _tri(ev.i_friendly), ev.note, ev.fingerprint, today_iso, chg,
+             ev.note, ev.fingerprint, today_iso, chg,
              old["id"]))
 
     @staticmethod
@@ -321,3 +340,137 @@ class Store:
         cur = self.conn.execute("SELECT run_date FROM runs ORDER BY id DESC LIMIT 1")
         row = cur.fetchone()
         return row["run_date"] if row else ""
+
+    def query_events(self, status="active", category=None, is_free=None,
+                     has_goods=None, keyword=None, price_tier=None,
+                     start_date_ge=None, start_date_le=None,
+                     limit=100, offset=0):
+        """Web 端灵活查询 events 表。
+
+        price_tier 是派生筛选(免费/¥100以下/¥100-300/¥300以上), 不走 SQL 列,
+        因为档位要按 price_text 现算 —— 见 core/models.py 的 price_tier()。
+        """
+        clauses, params = [], []
+        if status:
+            clauses.append("status = ?")
+            params.append(status)
+        if category:
+            clauses.append("category = ?")
+            params.append(category)
+        if is_free is not None:
+            clauses.append("is_free = ?")
+            params.append(1 if is_free else 0)
+        if has_goods is not None:
+            clauses.append("has_goods = ?")
+            params.append(1 if has_goods else 0)
+        if keyword:
+            kw = "%%%s%%" % keyword.strip()
+            clauses.append("(name LIKE ? OR venue LIKE ? OR note LIKE ?)")
+            params.extend([kw, kw, kw])
+        if start_date_ge:
+            clauses.append("start_date >= ?")
+            params.append(start_date_ge)
+        if start_date_le:
+            clauses.append("start_date <= ?")
+            params.append(start_date_le)
+
+        where = ("WHERE " + " AND ".join(clauses)) if clauses else ""
+        if price_tier:
+            # 档位筛选无法下推到 SQL: 先取全量再在内存里过滤
+            cur = self.conn.execute(
+                "SELECT * FROM events %s ORDER BY start_date ASC, id DESC" % where, params)
+            raw = [dict(r) for r in cur.fetchall()]
+            items = []
+            for it in raw:
+                tier = price_tier_of(it.get("price_text"),
+                                     _tri_in(it.get("is_free")))
+                if tier != price_tier:
+                    continue
+                it["price_tier"] = tier
+                items.append(it)
+            total = len(items)
+            start = max(0, int(offset))
+            return {"total": total,
+                    "items": items[start:start + max(1, int(limit))]}
+
+        cnt_cur = self.conn.execute("SELECT COUNT(*) AS total FROM events %s" % where, params)
+        total = cnt_cur.fetchone()["total"]
+
+        sql = ("SELECT * FROM events %s ORDER BY start_date ASC, id DESC LIMIT ? OFFSET ?"
+               % where)
+        cur = self.conn.execute(sql, params + [max(1, int(limit)), max(0, int(offset))])
+        items = [dict(r) for r in cur.fetchall()]
+        return {"total": total, "items": items}
+
+    def get_active_events_as_objects(self):
+        """读取所有 active 活动并转换为 Event 对象，供 _layout 分组渲染复用。"""
+        from core.models import Event
+        cur = self.conn.execute(
+            "SELECT * FROM events WHERE status='active' ORDER BY start_date ASC"
+        )
+        events = []
+        for r in cur.fetchall():
+            row = dict(r)
+            ev = Event(
+                name=row.get("name") or "",
+                start_date=row.get("start_date") or "",
+                end_date=row.get("end_date") or "",
+                venue=row.get("venue") or "",
+                price_text=row.get("price_text") or "",
+                is_free=True if row.get("is_free") == 1 else (False if row.get("is_free") == 0 else None),
+                category=row.get("category") or "A",
+                url=row.get("url") or "",
+                source=row.get("source") or "",
+                deadline=row.get("deadline") or "",
+                has_goods=True if row.get("has_goods") == 1 else (False if row.get("has_goods") == 0 else None),
+                note=row.get("note") or "",
+            )
+            ev.extra["db_id"] = row.get("id")
+            ev.extra["sources"] = row.get("sources") or row.get("source") or ""
+            ev.extra["first_seen"] = row.get("first_seen") or ""
+            ev.extra["last_seen"] = row.get("last_seen") or ""
+            events.append(ev)
+        return events
+
+    def get_runs(self, limit=20, offset=0):
+        """查询运行历史批次。"""
+        cnt_cur = self.conn.execute("SELECT COUNT(*) AS total FROM runs")
+        total = cnt_cur.fetchone()["total"]
+
+        cur = self.conn.execute(
+            "SELECT * FROM runs ORDER BY id DESC LIMIT ? OFFSET ?",
+            (max(1, int(limit)), max(0, int(offset)))
+        )
+        items = []
+        for r in cur.fetchall():
+            d = dict(r)
+            if d.get("detail"):
+                try:
+                    d["detail"] = json.loads(d["detail"])
+                except Exception:
+                    pass
+            items.append(d)
+        return {"total": total, "items": items}
+
+    def get_stats(self):
+        """统计概览数据。"""
+        cur = self.conn.execute(
+            "SELECT COUNT(*) AS total, "
+            "SUM(CASE WHEN status='active' THEN 1 ELSE 0 END) AS active, "
+            "SUM(CASE WHEN status='gone' THEN 1 ELSE 0 END) AS gone, "
+            "SUM(CASE WHEN status='expired' THEN 1 ELSE 0 END) AS expired "
+            "FROM events"
+        )
+        row = cur.fetchone()
+        run_cur = self.conn.execute("SELECT COUNT(*) AS total_runs FROM runs")
+        runs_count = run_cur.fetchone()["total_runs"]
+        last_date = self.last_run_date()
+        return {
+            "total_events": row["total"] or 0,
+            "active_events": row["active"] or 0,
+            "gone_events": row["gone"] or 0,
+            "expired_events": row["expired"] or 0,
+            "total_runs": runs_count or 0,
+            "last_run_date": last_date,
+        }
+

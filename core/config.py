@@ -151,6 +151,24 @@ CITY_PRESETS = {
 # 北京本地独立场馆源（切换到其他城市时默认跳过，避免把北京场馆活动混入外地报告）
 BEIJING_ONLY_SOURCES = {"chnmuseum", "chncpa", "cncc"}
 
+# 今日会展 (datexpo.com) 的城市筛选码。站点用 5 段数字编码而非城市名,
+# 只能从首页城市导航里抓出来一次写死（站点改版时需要重新校准）。
+DATEXPO_CITY_CODES = {
+    "北京": "1_1_0_0_0",
+    "上海": "1_21_0_0_0",
+    "广州": "1_423_424_0_0",
+    "深圳": "1_423_524_0_0",
+    "杭州": "1_3133_3134_0_0",
+    "成都": "1_2589_2590_0_0",
+    "武汉": "1_1320_1321_0_0",
+    "南京": "1_1643_1644_0_0",
+    "西安": "1_2471_2472_0_0",
+    "重庆": "1_62_0_0_0",
+    "苏州": "1_1643_1692_0_0",
+    "天津": "1_42_0_0_0",
+    "长沙": "1_1436_1437_0_0",
+}
+
 DEFAULTS = {
     "radar": {
         "window_days": "30",
@@ -159,6 +177,8 @@ DEFAULTS = {
         "weekend_only": "true",
         "city": "北京",
         # 名字里含这些词就丢弃：抽到的是「不可用/非门票」条目，不是活动
+        # ★ 品类级过滤(话剧/喜剧/戏曲...)已迁到 push.disabled_genres, 这里只留
+        #   真正无意义的噪音词。
         "exclude_keywords": "取消,不含门票,已售罄,停办",
         # 连续缺席几轮才判定「取消」。1 = 一缺就判。
         # ★ 不要设为 1：LLM 抽取有波动，一缺就判会天天误报活动取消。
@@ -227,39 +247,70 @@ DEFAULTS = {
         "notify_on_source_failure": "true",
         # 新增条数达到多少才触发推送，防止 LLM 抽取抖动骗出「有变化」
         "min_new_changes": "3",
+        # ★ 品类级推送开关（前端「配置渠道」页勾选）。
+        #   写成 "theater=off,comedy=off" = 「话剧/音乐剧」「脱口秀/相声」不推送；
+        #   留空 = 所有品类都推。品类判定见 core/genre.py。
+        "disabled_genres": "",
         # 推送正文上限, 超出截断并提示看文件
         "max_chars": "18000",
     },
 }
 
 
+class SourceRows(dict):
+    """[sources] 行容器，附带一份「未渲染」的原始模板。
+
+    apply_env_and_city 每次都从 templates 重新渲染，而不是在已渲染结果上叠加，
+    否则 --city / Web 切城市时第二次替换找不到 {douban_city} 这类占位符，
+    URL 会永远停留在上一次的城市（实测 --city 上海仍抓 /city/beijing）。
+    """
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.templates = {}
+
+
 def load_config(path=None):
-    """返回 (cfg, sources)。cfg 是带默认值的三层 dict, sources 是原始行 dict。"""
+    """返回 (cfg, sources)。cfg 是带默认值的三层 dict, sources 是原始行 dict。
+
+    ★ 叠加顺序: 内置默认值 → config.ini → config.local.ini。
+      后者已被 .gitignore 忽略, 用来放真实 API Key / 内网网关地址这类
+      不能进公开仓库的值。仓库里的 config.ini 只留占位与注释。
+    """
     path = path or CONFIG_FILE
     cfg = {s: dict(kv) for s, kv in DEFAULTS.items()}
-    sources = {}
+    sources = SourceRows()
     if not os.path.exists(path):
         return cfg, sources
-    # ★ interpolation=None 必须显式给: URL 里全是 %E5%8C%97 这种百分号转义,
-    #   默认的 BasicInterpolation 会把它当插值语法直接抛异常。
-    p = configparser.ConfigParser(interpolation=None)
-    try:
-        p.read(path, encoding="utf-8")
-    except Exception:
-        return cfg, sources
-    for section in cfg:
-        if not p.has_section(section):
+
+    # config.ini 之后再叠一层 config.local.ini(不入库): 真实 Key 与内网地址放这里
+    overlay = os.path.splitext(path)[0] + ".local.ini"
+    parsers = [path] + ([overlay] if os.path.exists(overlay) else [])
+
+    for cfg_path in parsers:
+        # ★ interpolation=None 必须显式给: URL 里全是 %E5%8C%97 这种百分号转义,
+        #   默认的 BasicInterpolation 会把它当插值语法直接抛异常。
+        p = configparser.ConfigParser(interpolation=None)
+        try:
+            p.read(cfg_path, encoding="utf-8")
+        except Exception:
             continue
-        for key in cfg[section]:
-            if not p.has_option(section, key):
+        for section in cfg:
+            if not p.has_section(section):
                 continue
-            val = (p.get(section, key) or "").strip()
-            # 空值 = 用默认, 这样配置文件里可以留 comment 掉的空壳
-            if val:
-                cfg[section][key] = val
-    if p.has_section("sources"):
-        for key, val in p.items("sources"):
-            sources[key] = (val or "").strip()
+            for key in cfg[section]:
+                if not p.has_option(section, key):
+                    continue
+                val = (p.get(section, key) or "").strip()
+                # 空值 = 用默认, 这样配置文件里可以留 comment 掉的空壳
+                if val:
+                    cfg[section][key] = val
+        if p.has_section("sources"):
+            for key, val in p.items("sources"):
+                raw = (val or "").strip()
+                sources[key] = raw
+                # 保留未渲染模板，供后续 --city / 切城市重新渲染
+                sources.templates[key] = raw
     apply_env_and_city(cfg, sources)
     return cfg, sources
 
@@ -357,21 +408,29 @@ def apply_env_and_city(cfg, sources, cli_overrides=None):
             cfg["extra"]["expo090_article"] = ""
 
     # 渲染或替换 [sources] 里的城市占位符与北京默认 URL
-    if sources:
+    # ★ 每次都从「未渲染模板」重新生成，不能在上一轮已替换的结果上再替换。
+    #   sources 可能是普通 dict（测试/外部调用），此时退回用当前值当模板。
+    templates = getattr(sources, "templates", None)
+    base = dict(templates) if templates else dict(sources)
+    if base:
         tpl_vars = {
             "city": city,
             "city_url": city_url,
             "bendibao_city": preset.get("bendibao_city") or "bj",
             "douban_city": preset.get("douban_city") or "beijing",
             "artron_code": preset.get("artron_code") or ("0-%s" % city_url),
+            "datexpo_code": DATEXPO_CITY_CODES.get(city, "1_1_0_0_0"),
         }
-        for sname, raw_row in list(sources.items()):
+        rendered = {}
+        for sname, raw_row in list(base.items()):
             sname_low = sname.strip().lower()
             # 非北京城市自动关闭北京专属场馆源（国博/国家大剧院/国家会议中心）
             if city != "北京" and sname_low in BEIJING_ONLY_SOURCES:
                 parsed = parse_source_row(raw_row)
                 if parsed and parsed["enabled"]:
-                    sources[sname] = "%s|off|%s" % (parsed["kind"], parsed["url"])
+                    rendered[sname] = "%s|off|%s" % (parsed["kind"], parsed["url"])
+                else:
+                    rendered[sname] = raw_row
                 continue
 
             new_row = raw_row
@@ -379,14 +438,22 @@ def apply_env_and_city(cfg, sources, cli_overrides=None):
                 new_row = new_row.replace("{" + k + "}", v)
 
             if city != "北京":
+                # 兼容手工写死北京 URL 的旧配置（模板里没有占位符）
                 new_row = new_row.replace("city=%E5%8C%97%E4%BA%AC", "city=%s" % city_url)
                 new_row = new_row.replace("1-%E5%8C%97%E4%BA%AC-0", "%s-0" % tpl_vars["artron_code"])
                 if preset.get("bendibao_city"):
                     new_row = new_row.replace("m.bj.bendibao.com", "m.%s.bendibao.com" % preset["bendibao_city"])
                 if preset.get("douban_city"):
                     new_row = new_row.replace("beijing.douban.com", "%s.douban.com" % preset["douban_city"])
+                    new_row = new_row.replace("/city/beijing", "/city/%s" % preset["douban_city"])
+                    new_row = new_row.replace("/event/beijing", "/event/%s" % preset["douban_city"])
                     new_row = new_row.replace("/beijing/", "/%s/" % preset["douban_city"])
-            sources[sname] = new_row
+            rendered[sname] = new_row
+        sources.clear()
+        sources.update(rendered)
+        if templates is not None:
+            templates.clear()
+            templates.update(base)
 
 
 def as_int(cfg, section, key, fallback):
@@ -429,7 +496,10 @@ def parse_source_row(val):
 
     返回 dict, 解析失败返回 None。空格容忍, 因为手工编辑很容易多打空格。
     """
-    parts = [x.strip() for x in (val or "").split("|")]
+    # 行尾允许写 # 注释（configparser 的 inline_comment 在自定义行格式里不生效，
+    # 手工在 [sources] 行尾加说明会把注释拼进 URL，导致必然 404）
+    val = (val or "").split("#", 1)[0]
+    parts = [x.strip() for x in val.split("|")]
     if len(parts) < 3:
         return None
     kind, enabled, url = parts[0].upper(), parts[1].lower(), parts[2]

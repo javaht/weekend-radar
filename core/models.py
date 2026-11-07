@@ -117,6 +117,70 @@ def price_anchor(price_text):
     return "%.2f" % min(nums)
 
 
+# 价格档位: 免费 / 100 以下 / 100-300 / 300 以上 / 未知
+PRICE_TIERS = ("free", "under100", "mid", "high", "unknown")
+PRICE_TIER_LABELS = {
+    "free": "免费",
+    "under100": "¥100 以下",
+    "mid": "¥100-300",
+    "high": "¥300 以上",
+    "unknown": "价格待核实",
+}
+
+# 「有票但不给价」的常见措辞。这些明确表示**要买票**, 所以 is_free 应为 False,
+# 而不是「未知」。区分它们和空串很重要:
+#   空串 = 页面没提票价 (真未知, 可能是免费展览)
+#   「购票见详情」= 明确要买票 (收费, 只是没给数字)
+PAID_HINT_RE = re.compile(r"购票|买票|订票|票价|预售|门票|元|￥|¥|收费|报名费")
+
+
+def infer_is_free(price_text, is_free=None):
+    """补全 is_free 的三态。
+
+    ★ 这是本轮修的判定 bug: 之前「购票见详情」被当成 is_free=None(未知),
+      导致 81 条活动里大量本该标「收费」的条目落进未知区, 「仅看免费」筛出来的
+      6 条还混着这些。有购票字样就必须是 False。
+    """
+    if is_free is True or is_free is False:
+        return is_free
+    s = str(price_text or "").strip()
+    if not s:
+        return None                      # 页面没提, 真未知
+    if "免费" in s:
+        return True
+    if PAID_HINT_RE.search(s):
+        return False
+    return None
+
+
+def price_tier(price_text, is_free=None):
+    """把票价串归到价格档位。供前端做价格筛选。
+
+    以最低价为准(price_anchor): 有 0 元档就算「免费」档存在, 用户可以零成本去。
+    """
+    if is_free is True:
+        return "free"
+    s = str(price_text or "").strip()
+    if not s:
+        return "unknown"
+    if "免费" in s:
+        return "free"
+    anchor = price_anchor(s)
+    if not anchor:
+        return "unknown"
+    try:
+        v = float(anchor)
+    except ValueError:
+        return "unknown"
+    if v <= 0:
+        return "free"
+    if v < 100:
+        return "under100"
+    if v < 300:
+        return "mid"
+    return "high"
+
+
 def normalize_name(name):
     """把「北京·BACC 动漫游戏嘉年华06」和「BACC动漫游戏嘉年华6」尽量收敛。
 
@@ -148,7 +212,6 @@ class Event:
     source: str = ""
     deadline: str = ""            # 报名截止, 多数为空
     has_goods: object = None      # 有实物(周边/集章/赠品) —— 三态
-    i_friendly: object = None     # 事务性交流友好 —— 三态
     note: str = ""                # 一句话看点
     extra: dict = field(default_factory=dict)
 

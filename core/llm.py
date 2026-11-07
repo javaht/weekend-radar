@@ -121,6 +121,78 @@ def build_endpoint_url(base_url, proto):
         return b + "/v1/messages"
 
 
+def build_models_url(base_url, mode="openai"):
+    """把 base_url 拼成 /models 列表地址，兼容 OpenAI / Anthropic 两种风格。
+
+    base_url 可能已经是 .../v1、.../v4、裸域名，甚至直接以 /chat/completions 结尾。
+    """
+    b = str(base_url or "").strip().rstrip("/")
+    if not b:
+        return []
+    # 已经是完整 chat 端点时回退到它的上级 /vN
+    b = re.sub(r"/(chat/completions|messages)$", "", b)
+    if b.endswith("/models"):
+        return [b]
+    cands = []
+    if re.search(r"/v\d+$", b):
+        cands.append(b + "/models")
+    else:
+        cands.append(b + "/v1/models")
+    cands.append(b + "/models")
+    # 去重保序
+    seen, out = set(), []
+    for u in cands:
+        if u not in seen:
+            seen.add(u)
+            out.append(u)
+    return out
+
+
+def fetch_model_ids(cfg, timeout=12, log=print):
+    """从当前 LLM 网关拉取可用模型 id 列表。
+
+    返回 (ids, note)。任何一步失败都不抛异常，note 里带可读原因，方便前端直接展示。
+    只取 id / name，绝不把响应里的凭证或其他字段回给前端。
+    """
+    _, base_url, mode, _, _ = resolve_provider_config(cfg)
+    key = load_key(cfg, log)
+    headers = {"User-Agent": "weekend-radar/1.0", "Accept": "application/json"}
+    if key:
+        headers["Authorization"] = "Bearer %s" % key
+    # Anthropic 兼容网关通常也要 x-apis-key
+    if str(mode).strip().lower() == "anthropic":
+        if key:
+            headers["x-apis-key"] = key
+        headers["anthropic-version"] = "2023-06-01"
+
+    urls = build_models_url(base_url, mode)
+    errors = []
+    for url in urls:
+        try:
+            req = urllib.request.Request(url, headers=headers, method="GET")
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                raw = r.read().decode("utf-8", "replace")
+            data = json.loads(raw)
+            items = data.get("data") or data.get("models") or []
+            ids = []
+            for x in items:
+                if isinstance(x, str):
+                    ids.append(x)
+                elif isinstance(x, dict):
+                    mid = x.get("id") or x.get("name") or x.get("model")
+                    if mid:
+                        ids.append(str(mid))
+            ids = [x for x in dict.fromkeys(ids) if x.strip()]
+            if ids:
+                return ids, "共 %d 个模型（%s）" % (len(ids), url.split("//")[-1].split("/")[0])
+            errors.append("%s: 返回空列表" % url.split("//")[-1])
+        except urllib.error.HTTPError as e:
+            errors.append("HTTP %s" % e.code)
+        except Exception as e:
+            errors.append("%s: %s" % (type(e).__name__, str(e)[:80]))
+    return [], "获取失败: " + "; ".join(errors[:3])
+
+
 class LLMResult:
     __slots__ = ("ok", "text", "err", "proto", "model", "truncated")
 
@@ -323,15 +395,14 @@ class LLM:
             "规则:\n"
             "1) 只抽取页面中明确出现的信息, 绝不编造。看不到就填 null。\n"
             "2) 日期统一成 YYYY-MM-DD。未知填 null。\n"
-            "3) category: A=展会/漫展/市集/快闪/博物馆特展/画展艺术展(不收戏剧/话剧); B=AI/开源/开发者/技术沙龙; C=大中型博览会(B2B)。\n"
+            "3) category: A=展会/漫展/市集/快闪/博物馆特展/画展艺术展/音乐会/演唱会/舞蹈演出(不收戏剧/话剧); B=AI/开源/开发者/技术沙龙; C=大中型博览会(B2B)。\n"
             "4) is_free: 明确免费填 true; 有明确票价填 false; 不确定填 null。\n"
             "5) has_goods: 页面提到周边/集章/赠品/纸质证书/管饭才填 true, 否则 null。\n"
-            "6) i_friendly: 逛集/市集/展台交流/志愿者类场合填 true, 纯演讲论坛填 null。\n"
             "7) 每条必须有 name 和 start_date, 缺任一则丢弃该条。\n"
             "8) 只要中国%s的活动, 其他城市丢弃。\n"
             "输出格式: [{\"name\":\"\",\"start_date\":\"\",\"end_date\":null,\"venue\":null,"
             "\"price_text\":null,\"is_free\":null,\"category\":\"A\",\"url\":null,"
-            "\"deadline\":null,\"has_goods\":null,\"i_friendly\":null,\"note\":null}]"
+            "\"deadline\":null,\"has_goods\":null,\"note\":null}]"
         ) % self.city
         prompt = (
             "来源页面: %s\n今天: %s, 时间窗口截止: %s\n"

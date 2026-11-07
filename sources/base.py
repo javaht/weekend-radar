@@ -13,7 +13,7 @@ import datetime
 import json
 import re
 
-from core.models import Event
+from core.models import Event, infer_is_free
 from core.timerange import parse_date, has_explicit_year
 
 # SSR 页面里的 window.__INITIAL_STATE__ = {...}; 大括号配平才能整段抠出来
@@ -95,19 +95,21 @@ def coerce_event(raw, source_name, default_category="A", fallback_url=""):
     cat = str(raw.get("category") or default_category).strip().upper()
     if cat not in ("A", "B", "C"):
         cat = default_category
+    price_text = str(raw.get("price_text") or "").strip()
     ev = Event(
         name=name,
         start_date=sd.isoformat(),
         end_date=ed.isoformat(),
         venue=str(raw.get("venue") or "").strip(),
-        price_text=str(raw.get("price_text") or "").strip(),
-        is_free=_tri(raw.get("is_free")),
+        price_text=price_text,
+        # ★ 不能直接用源给的 is_free: 很多源只写「购票见详情」不给布尔值,
+        #   那样会被当成「未知」, 让「仅看免费」筛出一堆实际要买票的活动。
+        is_free=infer_is_free(price_text, _tri(raw.get("is_free"))),
         category=cat,
         url=url,
         source=source_name,
         deadline=str(raw.get("deadline") or "").strip(),
         has_goods=_tri(raw.get("has_goods")),
-        i_friendly=_tri(raw.get("i_friendly")),
         note=str(raw.get("note") or "").strip(),
     )
     return ev
