@@ -13,16 +13,29 @@
           <select v-model="testChannel" class="field">
             <option v-for="ch in supportedChannels" :key="ch" :value="ch">{{ ch }}</option>
           </select>
+          <p class="mt-1.5 truncate text-[11px] text-muted-soft">{{ currentChannelMeta.desc }}</p>
         </div>
 
         <div>
-          <label class="field-label">Webhook URL / Endpoint</label>
-          <input v-model="testWebhook" type="text" placeholder="留空则读取 config.ini" class="field" />
+          <label class="field-label">{{ currentChannelMeta.urlLabel }}</label>
+          <input
+            v-model="testWebhook"
+            type="text"
+            :placeholder="currentChannelMeta.urlPlaceholder"
+            class="field"
+          />
+          <p class="mt-1.5 truncate text-[11px] text-muted-soft">{{ currentChannelMeta.urlHint }}</p>
         </div>
 
         <div>
-          <label class="field-label">Secret / Key（可选加签）</label>
-          <input v-model="testSecret" type="password" placeholder="留空则读取 config.ini" class="field" />
+          <label class="field-label">{{ currentChannelMeta.secretLabel }}</label>
+          <input
+            v-model="testSecret"
+            type="text"
+            :placeholder="currentChannelMeta.secretPlaceholder"
+            class="field"
+          />
+          <p class="mt-1.5 truncate text-[11px] text-muted-soft">{{ currentChannelMeta.secretHint }}</p>
         </div>
       </div>
 
@@ -72,11 +85,11 @@
           <div class="grid grid-cols-1 gap-4 sm:grid-cols-3">
             <div>
               <label class="field-label">默认城市 (city)</label>
-              <input v-model="configSections.radar.city" type="text" class="field" />
+              <input v-model="configSections.radar.city" type="text" placeholder="例: 北京、上海、广州" class="field" />
             </div>
             <div>
               <label class="field-label">时间窗口天数 (window_days)</label>
-              <input v-model="configSections.radar.window_days" type="number" class="field" />
+              <input v-model="configSections.radar.window_days" type="number" placeholder="例: 30" class="field" />
             </div>
             <div>
               <label class="field-label">仅保留周末 (weekend_only)</label>
@@ -102,7 +115,7 @@
             </div>
             <div>
               <label class="field-label">接口地址 (base_url)</label>
-              <input v-model="configSections.llm.base_url" type="text" class="field" />
+              <input v-model="configSections.llm.base_url" type="text" placeholder="例: http://127.0.0.1:3425 或 https://api.deepseek.com/v1" class="field" />
             </div>
             <div>
               <label class="field-label">模型名称 (model)</label>
@@ -110,7 +123,7 @@
                 <select v-if="modelOptions.length && !modelManual" v-model="configSections.llm.model" class="field min-w-0">
                   <option v-for="m in modelOptions" :key="m" :value="m">{{ m }}</option>
                 </select>
-                <input v-else v-model="configSections.llm.model" type="text" class="field min-w-0" placeholder="模型 id" />
+                <input v-else v-model="configSections.llm.model" type="text" class="field min-w-0" placeholder="例: group/deepseek-v4-1-flash" />
                 <button
                   type="button"
                   @click="handleFetchModels"
@@ -193,7 +206,7 @@
             </div>
             <div>
               <label class="field-label">新增触发门槛 (min_new_changes)</label>
-              <input v-model="configSections.push.min_new_changes" type="number" class="field" />
+              <input v-model="configSections.push.min_new_changes" type="number" placeholder="例: 3" class="field" />
             </div>
             <div>
               <label class="field-label">源失败推告警</label>
@@ -241,7 +254,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { ref, computed, watch, onMounted, onUnmounted } from 'vue'
 import { api } from '../api/client'
 import GenrePrefs from '../components/GenrePrefs.vue'
 import SaveFlash from '../components/SaveFlash.vue'
@@ -250,7 +263,102 @@ const supportedChannels = [
   'pushdeer', 'feishu', 'wecom', 'dingtalk', 'bark', 'telegram', 'serverchan'
 ]
 
-const testChannel = ref('feishu')
+const channelPresets: Record<string, {
+  name: string
+  desc: string
+  urlLabel: string
+  urlPlaceholder: string
+  urlHint: string
+  secretLabel: string
+  secretPlaceholder: string
+  secretHint: string
+}> = {
+  pushdeer: {
+    name: 'PushDeer',
+    desc: '轻量推送，支持 iOS / Mac / Android 客户端',
+    urlLabel: '接口 Endpoint（可选自建）',
+    urlPlaceholder: '例: https://api2.pushdeer.com/message/push',
+    urlHint: '留空读配置；官方通道默认使用官方 Endpoint 即可',
+    secretLabel: 'PushKey',
+    secretPlaceholder: '例: PDU12345Txxxxxxxxxxxx',
+    secretHint: 'PushDeer 客户端中生成的 PushKey',
+  },
+  feishu: {
+    name: '飞书机器人',
+    desc: '飞书群自定义机器人，支持交互式 Markdown 流式卡片',
+    urlLabel: 'Webhook URL',
+    urlPlaceholder: '例: https://open.feishu.cn/open-apis/bot/v2/hook/xxxx',
+    urlHint: '留空读配置；群设置中添加自定义机器人获取',
+    secretLabel: 'Secret / 加签密钥（可选）',
+    secretPlaceholder: '例: xxxxxxxxxxxxxxxxxxxxxxxx',
+    secretHint: '开启安全加签设置时填入；未开启请留空',
+  },
+  wecom: {
+    name: '企业微信',
+    desc: '企微群机器人，自动按 4096 字节安全截断',
+    urlLabel: 'Webhook URL',
+    urlPlaceholder: '例: https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxxx',
+    urlHint: '留空读配置；填完整 Webhook 地址或只填右侧 key',
+    secretLabel: '机器人 Key（与 URL 二选一）',
+    secretPlaceholder: '例: 693a91f6-xxxx-xxxx-xxxx-xxxxxxxxxxxx',
+    secretHint: '若未填 URL，填入 key 即可自动拼接官方地址',
+  },
+  dingtalk: {
+    name: '钉钉机器人',
+    desc: '钉钉群自定义机器人，支持签名校验与 Markdown 渲染',
+    urlLabel: 'Webhook URL',
+    urlPlaceholder: '例: https://oapi.dingtalk.com/robot/send?access_token=xxxx',
+    urlHint: '留空读配置；群机器人设置中复制完整 Webhook',
+    secretLabel: 'Secret / 加签密钥（可选）',
+    secretPlaceholder: '例: SECxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx',
+    secretHint: '开启「加签」安全选项时填入 SEC 开头的密钥',
+  },
+  bark: {
+    name: 'Bark (iOS)',
+    desc: 'iOS 极简推送工具，支持即时响铃与分组归档',
+    urlLabel: '服务器 URL（可选）',
+    urlPlaceholder: '例: https://api.day.app/',
+    urlHint: '留空读配置；官方服务使用默认地址即可',
+    secretLabel: 'Device Key',
+    secretPlaceholder: '例: xxxxxxxxxxxxxxxxxxxxxxxx',
+    secretHint: 'Bark App 首页显示的专属设备 Key',
+  },
+  telegram: {
+    name: 'Telegram',
+    desc: 'Telegram Bot 推送，通过 Bot API 发送消息',
+    urlLabel: 'Bot Token（或完整 URL）',
+    urlPlaceholder: '例: 123456789:ABCdefGhIJKlmNoPQRsTUVwxyz',
+    urlHint: '留空读配置；从 @BotFather 创建获取',
+    secretLabel: 'Chat ID',
+    secretPlaceholder: '例: 123456789 或 @my_channel',
+    secretHint: '接收消息的用户 ID、群组 ID 或公开频道名',
+  },
+  serverchan: {
+    name: 'Server酱',
+    desc: 'Server酱 Turbo 微信推送通道',
+    urlLabel: '自定义 Webhook URL（可选）',
+    urlPlaceholder: '例: https://sctapi.ftqq.com/xxxx.send',
+    urlHint: '留空读配置；官方通道无需填写 URL',
+    secretLabel: 'SendKey',
+    secretPlaceholder: '例: SCTxxxxxxxxxxxxxxxxxxxxxxxxx',
+    secretHint: 'Server酱后台分配的 SendKey',
+  },
+}
+
+const testChannel = ref('pushdeer')
+const currentChannelMeta = computed(() => {
+  return channelPresets[testChannel.value] || {
+    name: testChannel.value,
+    desc: '自定义消息推送通道',
+    urlLabel: 'Webhook URL / Endpoint',
+    urlPlaceholder: '例: https://example.com/webhook',
+    urlHint: '留空则读取 config.ini',
+    secretLabel: 'Secret / Key（可选）',
+    secretPlaceholder: '例: xxxxxxxxxxxxxxxx',
+    secretHint: '留空则读取 config.ini',
+  }
+})
+
 const testWebhook = ref('')
 const testSecret = ref('')
 const testing = ref(false)
@@ -366,6 +474,7 @@ async function handleTestPush() {
       channel: testChannel.value,
       webhook: testWebhook.value || undefined,
       secret: testSecret.value || undefined,
+      pushkey: testSecret.value || undefined,
     })
     testResult.value = res
   } catch (e: any) {
