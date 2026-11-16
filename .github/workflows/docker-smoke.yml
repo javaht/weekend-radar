@@ -65,6 +65,21 @@ jobs:
           echo "frontend asset: $asset"
           curl -fsS "http://127.0.0.1:8000${asset}" -o /dev/null
 
+      - name: 准备 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: 安装 Chromium
+        working-directory: web
+        run: |
+          npm install --no-save playwright
+          npx playwright install --with-deps chromium
+
+      - name: 前端运行时冒烟（真实浏览器）
+        working-directory: web
+        run: node e2e/smoke.mjs
+
       - name: 检查启动日志无异常栈
         run: |
           docker logs radar-ci > /tmp/container.log 2>&1
