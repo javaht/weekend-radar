@@ -61,6 +61,8 @@ CITY_PRESETS = {
         "adcode": "440300",
         "damai_city": "101280600",
         "bendibao_city": "sz",
+        # 本地宝深圳没有 m.sz 这台（NXDOMAIN），只有桌面站 sz.bendibao.com
+        "bendibao_host": "sz.bendibao.com",
         "douban_city": "shenzhen",
         "artron_code": "3-%E5%B9%BF%E4%B8%9C",
         "venue_aliases": [
@@ -443,6 +445,11 @@ def apply_env_and_city(cfg, sources, cli_overrides=None):
                 new_row = new_row.replace("1-%E5%8C%97%E4%BA%AC-0", "%s-0" % tpl_vars["artron_code"])
                 if preset.get("bendibao_city"):
                     new_row = new_row.replace("m.bj.bendibao.com", "m.%s.bendibao.com" % preset["bendibao_city"])
+                # 个别城市没有 m.* 移动站（深圳），用预设里的主机完整替换
+                if preset.get("bendibao_host"):
+                    new_row = new_row.replace(
+                        "m.%s.bendibao.com" % tpl_vars["bendibao_city"],
+                        preset["bendibao_host"])
                 if preset.get("douban_city"):
                     new_row = new_row.replace("beijing.douban.com", "%s.douban.com" % preset["douban_city"])
                     new_row = new_row.replace("/city/beijing", "/city/%s" % preset["douban_city"])

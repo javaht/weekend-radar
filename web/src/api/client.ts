@@ -31,6 +31,7 @@ export interface WeekendGroup {
 export interface GroupedEventsResponse {
   city: string
   data_city?: string
+  has_data?: boolean
   today: string
   window_days: number
   total_active: number
@@ -54,6 +55,7 @@ export interface TaskStatus {
   task_type: string | null
   city: string | null
   started_at: string | null
+  stopping?: boolean
   last_result?: Record<string, any>
 }
 
@@ -140,6 +142,10 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(payload),
     }),
+  stopRun: () =>
+    request<{ message: string }>('/api/radar/stop', {
+      method: 'POST',
+    }),
   triggerPlan: (payload: { city?: string }) =>
     request<any>('/api/radar/plan', {
       method: 'POST',
@@ -158,7 +164,7 @@ export const api = {
     request<{ ok: boolean }>('/api/radar/logs/clear', {
       method: 'POST',
     }),
-  testPush: (payload: { channel: string; title?: string; body?: string; webhook?: string; secret?: string; pushkey?: string }) =>
+  testPush: (payload: { channel: string; title?: string; body?: string; webhook?: string; secret?: string; pushkey?: string; fields?: Record<string, string> }) =>
     request<any>('/api/push/test', {
       method: 'POST',
       body: JSON.stringify(payload),

@@ -21,7 +21,10 @@
         <p class="mt-1 text-[13px] leading-relaxed text-muted">
           {{ summaryLine }}
         </p>
-        <p v-if="data?.data_city && data.city !== data.data_city" class="mt-1 text-[12px] text-accent-amber">
+        <p v-if="data && data.has_data === false" class="mt-1 text-[12px] text-accent-amber">
+          「{{ data.city }}」暂无采集数据，请到任务中控以该城市执行一次任务。
+        </p>
+        <p v-else-if="data?.data_city && data.city !== data.data_city" class="mt-1 text-[12px] text-accent-amber">
           当前库内为「{{ data.data_city }}」采集的数据；切换到 {{ data.city }} 后需以该城市执行一次任务才会更新清单。
         </p>
       </div>

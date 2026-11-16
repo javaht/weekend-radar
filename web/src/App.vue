@@ -59,6 +59,7 @@ const taskStatus = ref<TaskStatus>({
   task_type: null,
   city: null,
   started_at: null,
+  stopping: false,
 })
 
 const currentViewComponent = computed(() => {

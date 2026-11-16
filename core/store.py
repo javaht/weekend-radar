@@ -41,10 +41,11 @@ CREATE TABLE IF NOT EXISTS events(
   key_chg_count INTEGER DEFAULT 0,
   pending_fp  TEXT,
   sources     TEXT,
+  city        TEXT DEFAULT '',
   status      TEXT DEFAULT 'active'
 );
-CREATE UNIQUE INDEX IF NOT EXISTS ux_events
-  ON events(name_norm, IFNULL(start_date,''), IFNULL(end_date,''));
+-- ux_events 在 _ensure_schema 里创建：它依赖 city 列，
+-- 老库要先 ALTER 补列，不能在 executescript 阶段建。
 CREATE INDEX IF NOT EXISTS ix_events_status ON events(status);
 
 CREATE TABLE IF NOT EXISTS runs(
@@ -79,9 +80,12 @@ def _tri_in(v):
 
 class Store:
     def __init__(self, path, log=print, gone_after=2, stable_sources=None,
-                 confirm_runs=2):
+                 confirm_runs=2, default_city=""):
         self.path = path
         self.log = log
+        # 唯一键不含城市，所以「同一活动在不同城市」会撞键；
+        # 差分和查询都必须按 city 收窄。旧库补列时用 default_city 回填。
+        self.default_city = str(default_city or "").strip()
         # 连续缺席多少轮才判定"取消"
         self.gone_after = max(1, int(gone_after))
         # ★ 只有确定性源才允许判"取消"。LLM 抽取的源每轮覆盖条数会波动
@@ -96,6 +100,12 @@ class Store:
         self.conn = sqlite3.connect(path)
         self.conn.row_factory = sqlite3.Row
         self._ensure_schema()
+        # 幂等回填：老库补 city 列后，历史行按默认城市归属。
+        if self.default_city:
+            self.conn.execute(
+                "UPDATE events SET city=? WHERE city IS NULL OR city=''",
+                (self.default_city,))
+            self.conn.commit()
 
     def _ensure_schema(self):
         with _init_lock:
@@ -110,6 +120,28 @@ class Store:
                     self.conn.execute("ALTER TABLE events ADD COLUMN " + col)
                 except Exception:
                     pass
+            # city 是后加的隔离维度：旧库补列后要把历史行回填成本机默认城市，
+            # 否则按城市过滤会把老数据全部隐藏。
+            # 补列。回填放在 __init__ 里做：_ensure_schema 每个路径只跑一次，
+            # 若首个 Store 没带 default_city（例如 stats 接口），这里会漏回填。
+            try:
+                self.conn.execute("ALTER TABLE events ADD COLUMN city TEXT DEFAULT ''")
+            except Exception:
+                pass
+            # 唯一键加上 city：不同城市可能同名同档期（巡展），不能互相顶掉。
+            # 旧库的索引不含 city，重建一次。
+            try:
+                self.conn.execute("DROP INDEX IF EXISTS ux_events")
+                self.conn.execute(
+                    "CREATE UNIQUE INDEX IF NOT EXISTS ux_events"
+                    " ON events(name_norm, IFNULL(start_date,''),"
+                    " IFNULL(end_date,''), IFNULL(city,''))")
+            except Exception:
+                pass
+            try:
+                self.conn.execute("CREATE INDEX IF NOT EXISTS ix_events_city ON events(city)")
+            except Exception:
+                pass
             self.conn.commit()
             _initialized_paths.add(self.path)
 
@@ -139,9 +171,13 @@ class Store:
         srcs.add(row["source"] or "")
         return bool(srcs & self.stable_sources)
 
-    def active_map(self):
-        """当前库里所有 active 的活动, 以唯一键索引。"""
-        cur = self.conn.execute("SELECT * FROM events WHERE status='active'")
+    def active_map(self, city=None):
+        """当前库里所有 active 的活动, 以唯一键索引。city 给定时只取该城。"""
+        if city:
+            cur = self.conn.execute(
+                "SELECT * FROM events WHERE status='active' AND city=?", (city,))
+        else:
+            cur = self.conn.execute("SELECT * FROM events WHERE status='active'")
         return {self._row_key(row): row for row in cur}
 
     def expire(self, today_iso):
@@ -179,14 +215,15 @@ class Store:
                 best, best_gap = row, gap
         return best
 
-    def _insert(self, ev, today_iso):
+    def _insert(self, ev, today_iso, city=""):
         """新活动入库。若同键的 gone/expired 旧行还在, 复活它而不是被唯一索引静默吞掉。"""
         dead = self.conn.execute(
             "SELECT id FROM events WHERE status!='active' AND name_norm=?"
-            " AND IFNULL(start_date,'')=? AND IFNULL(end_date,'')=?",
-            self._key(ev)).fetchone()
+            " AND IFNULL(start_date,'')=? AND IFNULL(end_date,'')=?"
+            " AND IFNULL(city,'')=?",
+            self._key(ev) + (city or "",)).fetchone()
         if dead:
-            self._write(dead, ev, today_iso, "", 0)
+            self._write(dead, ev, today_iso, "", 0, city=city)
             self.conn.execute("UPDATE events SET first_seen=? WHERE id=?",
                               (today_iso, dead["id"]))
             return
@@ -194,14 +231,14 @@ class Store:
             "INSERT INTO events"
             "(name,name_norm,start_date,end_date,venue,price_text,is_free,"
             " category,url,source,sources,deadline,has_goods,note,"
-            " fingerprint,first_seen,last_seen,status)"
-            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active')",
+            " fingerprint,first_seen,last_seen,city,status)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active')",
             (ev.name, ev.name_norm, ev.start_date, ev.end_date, ev.venue,
              ev.price_text, _tri(ev.is_free), ev.category, ev.url, ev.source,
              self._sources_of(ev), ev.deadline, _tri(ev.has_goods),
-             ev.note, ev.fingerprint, today_iso, today_iso))
+             ev.note, ev.fingerprint, today_iso, today_iso, city or ""))
 
-    def apply(self, events, today_iso, all_sources_ok, source_stats):
+    def apply(self, events, today_iso, all_sources_ok, source_stats, city=""):
         """把本轮结果并入库, 返回差分报告。
 
         ★ 变更确认机制（这套东西能长期跑而不天天误报的关键）：
@@ -210,7 +247,7 @@ class Store:
           未确认前保留旧值、不写进报告。代价是真实变更会晚一天体现，换来的是推送不抽风。
         """
         self.expire(today_iso)
-        prev = self.active_map()
+        prev = self.active_map(city=city)
         by_name = {}
         for row in prev.values():
             by_name.setdefault(row["name_norm"], []).append(row)
@@ -227,13 +264,13 @@ class Store:
                 old = self._find_moved(ev, by_name, claimed, round_keys)
 
             if old is None:
-                self._insert(ev, today_iso)
+                self._insert(ev, today_iso, city=city)
                 new_list.append(ev)
                 continue
             claimed.add(old["id"])
 
             if old["fingerprint"] == ev.fingerprint:
-                self._write(old, ev, today_iso, "", 0)
+                self._write(old, ev, today_iso, "", 0, city=city)
                 unchanged += 1
                 continue
 
@@ -252,7 +289,7 @@ class Store:
                 continue
 
             kind = self._classify(old, ev)
-            self._write(old, ev, today_iso, kind, 0)
+            self._write(old, ev, today_iso, kind, 0, city=city)
             if kind:
                 changed_list.append({
                     "event": ev,
@@ -300,24 +337,25 @@ class Store:
         return {"new": new_list, "changed": changed_list, "gone": gone_list,
                 "unchanged": unchanged}
 
-    def _write(self, old, ev, today_iso, kind, chg):
+    def _write(self, old, ev, today_iso, kind, chg, city=""):
         """把本轮的展示字段写回去，并重置缺席/变更计数。"""
         # 改期后的新键可能撞上一条已归档(gone/expired)的旧行: 它已被本行取代, 删掉,
         # 否则 UPDATE 会触发唯一索引冲突
         self.conn.execute(
             "DELETE FROM events WHERE status!='active' AND id!=? AND name_norm=?"
-            " AND IFNULL(start_date,'')=? AND IFNULL(end_date,'')=?",
-            (old["id"],) + self._key(ev))
+            " AND IFNULL(start_date,'')=? AND IFNULL(end_date,'')=?"
+            " AND IFNULL(city,'')=?",
+            (old["id"],) + self._key(ev) + (city or "",))
         self.conn.execute(
             "UPDATE events SET name=?,name_norm=?,start_date=?,end_date=?,"
             "venue=?,price_text=?,is_free=?,category=?,url=?,source=?,sources=?,"
-            "deadline=?,has_goods=?,note=?,fingerprint=?,"
+            "deadline=?,has_goods=?,note=?,fingerprint=?,city=?,"
             "last_seen=?,status='active',miss_count=0,key_chg_count=?,"
             "pending_fp=NULL WHERE id=?",
             (ev.name, ev.name_norm, ev.start_date, ev.end_date, ev.venue,
              ev.price_text, _tri(ev.is_free), ev.category, ev.url, ev.source,
              self._sources_of(ev), ev.deadline, _tri(ev.has_goods),
-             ev.note, ev.fingerprint, today_iso, chg,
+             ev.note, ev.fingerprint, city or "", today_iso, chg,
              old["id"]))
 
     @staticmethod
@@ -344,7 +382,7 @@ class Store:
     def query_events(self, status="active", category=None, is_free=None,
                      has_goods=None, keyword=None, price_tier=None,
                      start_date_ge=None, start_date_le=None,
-                     limit=100, offset=0):
+                     city=None, limit=100, offset=0):
         """Web 端灵活查询 events 表。
 
         price_tier 是派生筛选(免费/¥100以下/¥100-300/¥300以上), 不走 SQL 列,
@@ -354,6 +392,9 @@ class Store:
         if status:
             clauses.append("status = ?")
             params.append(status)
+        if city:
+            clauses.append("city = ?")
+            params.append(city)
         if category:
             clauses.append("category = ?")
             params.append(category)
@@ -402,12 +443,17 @@ class Store:
         items = [dict(r) for r in cur.fetchall()]
         return {"total": total, "items": items}
 
-    def get_active_events_as_objects(self):
+    def get_active_events_as_objects(self, city=None):
         """读取所有 active 活动并转换为 Event 对象，供 _layout 分组渲染复用。"""
         from core.models import Event
-        cur = self.conn.execute(
-            "SELECT * FROM events WHERE status='active' ORDER BY start_date ASC"
-        )
+        if city:
+            cur = self.conn.execute(
+                "SELECT * FROM events WHERE status='active' AND city=?"
+                " ORDER BY start_date ASC", (city,))
+        else:
+            cur = self.conn.execute(
+                "SELECT * FROM events WHERE status='active' ORDER BY start_date ASC"
+            )
         events = []
         for r in cur.fetchall():
             row = dict(r)

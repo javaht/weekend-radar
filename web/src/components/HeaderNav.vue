@@ -41,11 +41,11 @@
 
         <div class="hidden items-center gap-1.5 rounded-xl border border-hairline bg-white px-2.5 py-1.5 sm:flex">
           <span class="relative flex h-1.5 w-1.5">
-            <span v-if="taskStatus.running" class="absolute inline-flex h-full w-full animate-ping rounded-full bg-accent-green opacity-60"></span>
-            <span class="relative inline-flex h-1.5 w-1.5 rounded-full" :class="taskStatus.running ? 'bg-accent-green' : 'bg-hairline'"></span>
+            <span v-if="taskStatus.running" class="absolute inline-flex h-full w-full animate-ping rounded-full opacity-60" :class="taskStatus.stopping ? 'bg-accent-amber' : 'bg-accent-green'"></span>
+            <span class="relative inline-flex h-1.5 w-1.5 rounded-full" :class="taskStatus.running ? (taskStatus.stopping ? 'bg-accent-amber' : 'bg-accent-green') : 'bg-hairline'"></span>
           </span>
-          <span class="whitespace-nowrap text-[11px] font-medium" :class="taskStatus.running ? 'text-accent-green' : 'text-muted'">
-            {{ taskStatus.running ? `${(taskStatus.task_type || '任务').toUpperCase()} 中` : '就绪' }}
+          <span class="whitespace-nowrap text-[11px] font-medium" :class="taskStatus.running ? (taskStatus.stopping ? 'text-accent-amber' : 'text-accent-green') : 'text-muted'">
+            {{ taskStatus.running ? (taskStatus.stopping ? '停止中' : `${(taskStatus.task_type || '任务').toUpperCase()} 中`) : '就绪' }}
           </span>
         </div>
       </div>
@@ -65,6 +65,7 @@ defineProps<{
     task_type: string | null
     city: string | null
     started_at: string | null
+    stopping?: boolean
   }
 }>()
 

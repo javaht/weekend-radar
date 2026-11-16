@@ -10,14 +10,28 @@
           </p>
         </div>
 
-        <button
-          @click="handleRun"
-          :disabled="isBusy || props.taskStatus.running"
-          class="btn-primary tactile-button disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          <span v-if="isBusy || props.taskStatus.running" class="mr-2 inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent align-middle"></span>
-          正式执行并入库
-        </button>
+        <div class="flex items-center gap-2">
+          <button
+            v-if="props.taskStatus.running && props.taskStatus.task_type === 'run'"
+            :title="stopping ? '当前数据源结束后终止，本轮不入库' : '中止本轮任务（当前数据源结束后生效）'"
+            @click="handleStop"
+            :disabled="stopping"
+            class="tactile-button flex h-[38px] flex-shrink-0 items-center gap-1.5 rounded-xl border border-accent/40 bg-accent/5 px-3.5 text-[13px] font-semibold text-accent transition-colors hover:bg-accent/10 disabled:opacity-60"
+          >
+            <span v-if="stopping" class="h-3 w-3 animate-spin rounded-full border-2 border-accent border-t-transparent"></span>
+            <span>{{ stopping ? '正在停止…' : '停止任务' }}</span>
+          </button>
+
+          <button
+            v-if="!(props.taskStatus.running && stopping)"
+            @click="handleRun"
+            :disabled="isBusy || props.taskStatus.running"
+            class="btn-primary tactile-button disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <span v-if="isBusy || props.taskStatus.running" class="mr-2 inline-block h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent align-middle"></span>
+            正式执行并入库
+          </button>
+        </div>
       </div>
     </section>
 
@@ -62,7 +76,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted, nextTick } from 'vue'
+import { ref, watch, onMounted, onUnmounted, nextTick } from 'vue'
 import { api } from '../api/client'
 
 const props = defineProps<{
@@ -75,6 +89,8 @@ const emit = defineEmits<{
 }>()
 
 const isBusy = ref(false)
+const stopping = ref(false)
+let statusTimer: number | null = null
 const logs = ref<string[]>([])
 const autoScroll = ref(true)
 const terminalRef = ref<HTMLDivElement | null>(null)
@@ -109,13 +125,60 @@ async function handleRun() {
     // 页面不再提供 Dry-Run / Force-Push 开关，统一按「正式执行」调用:
     // 入库、写报告、按 push 配置的规则决定是否推送。
     await api.triggerRun({ city: props.city })
+    // 父组件的状态轮询是 10s 粒度：这里自己快轮询，running 一翻转就通知父级，
+    // 避免「已开始跑但停止按钮要等 10 秒才出现」。
+    emit('task-finished')
+    if (statusTimer) clearInterval(statusTimer)
+    let tries = 0
+    statusTimer = window.setInterval(async () => {
+      tries += 1
+      try {
+        const s = await api.getStatus()
+        if (s.running || tries > 20) {
+          if (statusTimer) { clearInterval(statusTimer); statusTimer = null }
+          isBusy.value = false
+          emit('task-finished')
+        }
+      } catch {}
+    }, 500)
   } catch (e: any) {
-    alert(e.message)
-  } finally {
     isBusy.value = false
+    alert(e.message)
     emit('task-finished')
   }
 }
+
+async function handleStop() {
+  stopping.value = true
+  try {
+    await api.stopRun()
+    // 立刻刷新一次全局状态，让顶栏从「RUN 中」切到「停止中」
+    emit('task-finished')
+    // 后端只置停止标记：当前数据源跑完才真正结束，这里轮询到状态翻转
+    if (statusTimer) clearInterval(statusTimer)
+    statusTimer = window.setInterval(async () => {
+      try {
+        const s = await api.getStatus()
+        if (!s.running) {
+          if (statusTimer) { clearInterval(statusTimer); statusTimer = null }
+          stopping.value = false
+          emit('task-finished')
+        }
+      } catch {}
+    }, 1500)
+  } catch (e: any) {
+    stopping.value = false
+    alert(e.message)
+  }
+}
+
+// 任务自然结束（或停止生效）后，清掉本地「正在停止」状态
+watch(() => props.taskStatus.running, (running) => {
+  if (!running) {
+    stopping.value = false
+    if (statusTimer) { clearInterval(statusTimer); statusTimer = null }
+  }
+})
 
 async function clearLogs() {
   logs.value = []
@@ -146,5 +209,6 @@ onUnmounted(() => {
   if (eventSource) {
     eventSource.close()
   }
+  if (statusTimer) clearInterval(statusTimer)
 })
 </script>

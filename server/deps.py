@@ -3,6 +3,7 @@
 import asyncio
 import os
 import sys
+import threading
 import time
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -14,6 +15,22 @@ from core.store import Store
 from server.logger import bus_logger
 
 task_lock = asyncio.Lock()
+
+# 停止信号：do_run 跑在线程池里，Python 没法强杀线程，只能靠协作式标记。
+# 采集循环在每个源开始前检查一次，命中就中止并放弃本轮入库。
+stop_event = threading.Event()
+
+
+def request_stop():
+    stop_event.set()
+
+
+def clear_stop():
+    stop_event.clear()
+
+
+def stop_requested():
+    return stop_event.is_set()
 
 task_status = {
     "running": False,
@@ -31,7 +48,7 @@ def get_cfg(city_override=None):
     return cfg, src_rows
 
 
-def get_store(cfg=None):
+def get_store(cfg=None, default_city=""):
     if cfg is None:
         cfg, _ = get_cfg()
     db_path = abspath(cfg["radar"].get("db", "data/radar.sqlite"))
@@ -42,6 +59,7 @@ def get_store(cfg=None):
         gone_after=as_int(cfg, "radar", "gone_after_misses", 2),
         stable_sources=csv_list(cfg, "radar", "stable_sources", "bili"),
         confirm_runs=as_int(cfg, "radar", "confirm_runs", 2),
+        default_city=default_city,
     )
 
 

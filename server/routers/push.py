@@ -2,7 +2,7 @@
 """推送通道测试与消息触发接口。"""
 from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
-from typing import Optional
+from typing import Dict, Optional
 
 from core.push import send as push_send, SUPPORTED_CHANNELS
 from server.deps import get_cfg
@@ -20,6 +20,9 @@ class PushTestRequest(BaseModel):
     webhook: Optional[str] = None
     secret: Optional[str] = None
     pushkey: Optional[str] = None
+    # 前端按渠道真实配置键传值（如 wecom_webhook / wecom_key），
+    # 避免各渠道字段名不同、又只能靠 webhook/secret 猜。
+    fields: Optional[Dict[str, str]] = None
 
 
 @router.get("/channels")
@@ -75,6 +78,15 @@ def test_push_channel(req: PushTestRequest):
                 pcfg["push"]["telegram_chat_id"] = key_val
             else:
                 pcfg["push"]["telegram_bot_token"] = key_val
+
+    # 精确覆盖：前端直接给「渠道真实配置键 → 值」，优先级最高。
+    # 与保存用的是同一组键，测试通过 = 保存后正式推送也能用。
+    for k, v in (req.fields or {}).items():
+        try:
+            validate_url_value("push", k, v or "")
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=str(e))
+        pcfg["push"][k] = str(v or "")
 
     bus_logger.log(f"触发通道测试: {req.channel}")
     res = push_send(pcfg, req.title, req.body, log=bus_logger.log)

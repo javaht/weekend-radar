@@ -35,7 +35,7 @@ from sources.registry import build_sources  # noqa: E402
 from sources.fake import FakeSource  # noqa: E402
 from tools.probe import run_probe, format_probe  # noqa: E402
 
-EXIT_OK, EXIT_FAIL, EXIT_ARG, EXIT_PUSH = 0, 1, 2, 3
+EXIT_OK, EXIT_FAIL, EXIT_ARG, EXIT_PUSH, EXIT_STOPPED = 0, 1, 2, 3, 4
 
 
 def log(msg):
@@ -68,9 +68,17 @@ def _build(cfg, src_rows, today, window_end, include_disabled=False, only=None):
 
 
 # ---------------------------------------------------------------- 采集与合并
-def _collect(sources):
+def _collect(sources, stop_check=None):
+    """逐源采集。stop_check 为协作式停止信号：只在两次源之间检查，
+    因为 fetch 可能卡在网络请求里，没法安全打断。
+    返回 (events, stats, stopped)。"""
     stats, events = [], []
-    for src in sources:
+    stopped = False
+    for i, src in enumerate(sources):
+        if stop_check and stop_check():
+            log("[停止] 收到停止请求，跳过剩余 %d 个源" % (len(sources) - i))
+            stopped = True
+            break
         name = getattr(src, "name", "?")
         log("  [采集] %s ..." % name)
         try:
@@ -86,7 +94,7 @@ def _collect(sources):
             log("    → %d 条%s" % (res.count, (" | " + res.note) if res.note else ""))
         else:
             log("    → [失败] %s" % res.err)
-    return events, stats
+    return events, stats, stopped
 
 
 def _venue_conflict(a, b):
@@ -305,7 +313,7 @@ def do_plan(cfg, src_rows):
     if not sources:
         log("[!] config.ini 的 [sources] 没有任何启用的源")
         return EXIT_ARG
-    events, stats = _collect(sources)
+    events, stats, _ = _collect(sources)
     raw_n = len(events)
     events = _merge(events, log)
     merged_n = len(events)
@@ -421,7 +429,7 @@ def _decide_push(cfg, stats, diff, events, today, force_push=False):
         n_new, min_new, len(diff["changed"]))
 
 
-def do_run(cfg, src_rows, dry_run=False, force_push=False):
+def do_run(cfg, src_rows, dry_run=False, force_push=False, stop_check=None):
     today, days, window_end = _window(cfg)
     weekend_only = as_bool(cfg, "radar", "weekend_only", True)
     city = cfg["radar"].get("city", "北京")
@@ -433,7 +441,12 @@ def do_run(cfg, src_rows, dry_run=False, force_push=False):
         log("[!] config.ini 的 [sources] 没有任何启用的源")
         return EXIT_ARG
 
-    events, stats = _collect(sources)
+    events, stats, stopped = _collect(sources, stop_check=stop_check)
+    if stopped:
+        # ★ 中止不能入库：残缺的一轮会被当成「本轮没抓到」，
+        #   把没跑到的源的活动全部记成取消。宁可本轮作废。
+        log("[停止] 已中止，本轮不入库、不写报告、不推送")
+        return EXIT_STOPPED
     events = _merge(events, log)
     exclude = csv_list(cfg, "radar", "exclude_keywords")
     events = _filter(events, today, days, weekend_only, exclude, target_city=city)
@@ -443,11 +456,12 @@ def do_run(cfg, src_rows, dry_run=False, force_push=False):
     store = Store(abspath(cfg["radar"].get("db", "data/radar.sqlite")), log,
                   gone_after=as_int(cfg, "radar", "gone_after_misses", 2),
                   stable_sources=csv_list(cfg, "radar", "stable_sources", "bili"),
-                  confirm_runs=as_int(cfg, "radar", "confirm_runs", 2))
+                  confirm_runs=as_int(cfg, "radar", "confirm_runs", 2),
+                  default_city=city)
     try:
         has_baseline = bool(store.last_run_date())
         all_ok = all(s["ok"] for s in stats)
-        diff = store.apply(events, today.isoformat(), all_ok, stats)
+        diff = store.apply(events, today.isoformat(), all_ok, stats, city=city)
         log("差分: NEW %d / 变化 %d / 取消 %d"
             % (len(diff["new"]), len(diff["changed"]), len(diff["gone"])))
         groups = TR.weekend_groups(today, days)

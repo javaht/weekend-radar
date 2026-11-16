@@ -8,7 +8,10 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 import run
-from server.deps import task_lock, task_status, update_task_status, get_cfg
+from server.deps import (
+    task_lock, task_status, update_task_status, get_cfg,
+    clear_stop, request_stop, stop_requested,
+)
 from server.logger import bus_logger
 from server.auth import require_write
 from tools.probe import run_probe
@@ -38,7 +41,9 @@ WRITE_DEPS = [Depends(require_write)]
 
 @router.get("/status")
 def get_status():
-    return task_status
+    # stopping：已发停止请求但当前源还没跑完。前端用它把状态从
+    # 「RUN 中」切成「停止中」，避免看起来还在正常执行。
+    return {**task_status, "stopping": bool(task_status.get("running") and stop_requested())}
 
 
 @router.get("/logs/stream")
@@ -90,9 +95,11 @@ async def _execute_run_async(city: Optional[str], dry_run: bool, force_push: boo
                 loop = asyncio.get_event_loop()
                 code = await loop.run_in_executor(
                     None,
-                    lambda: run.do_run(cfg, src_rows, dry_run=dry_run, force_push=force_push)
+                    lambda: run.do_run(cfg, src_rows, dry_run=dry_run,
+                                       force_push=force_push, stop_check=stop_requested)
                 )
-                res = {"exit_code": code, "success": code == run.EXIT_OK}
+                res = {"exit_code": code, "success": code == run.EXIT_OK,
+                       "stopped": code == run.EXIT_STOPPED}
             finally:
                 run.log = orig_log
             update_task_status(False, result=res)
@@ -127,8 +134,24 @@ async def _execute_plan_async(city: Optional[str]):
 async def trigger_run(req: RunTaskRequest, bg_tasks: BackgroundTasks):
     if task_lock.locked() or task_status["running"]:
         raise HTTPException(status_code=409, detail="已有正在运行的任务，请等待其完成")
+    # 清掉上一轮可能残留的停止标记，避免新任务刚起就被中止
+    clear_stop()
     bg_tasks.add_task(_execute_run_async, req.city, req.dry_run, req.force_push, req.channel)
     return {"message": "任务已触发", "city": req.city, "dry_run": req.dry_run, "force_push": req.force_push}
+
+
+@router.post("/stop", dependencies=WRITE_DEPS)
+def stop_run():
+    """请求中止当前运行任务。
+
+    ★ 只置协作式停止标记：do_run 在采集循环的源之间检查，
+      当前源跑完就退出，并且**放弃本轮入库**（残缺数据会被误判成取消）。
+    """
+    if not task_status["running"] or task_status.get("task_type") != "run":
+        raise HTTPException(status_code=409, detail="当前没有可停止的运行任务")
+    request_stop()
+    bus_logger.log("[停止] 已收到停止请求，当前数据源结束后中止（本轮不入库、不推送）")
+    return {"message": "已请求停止，当前数据源结束后中止"}
 
 
 @router.post("/plan", dependencies=WRITE_DEPS)

@@ -4,7 +4,7 @@
     <section class="panel p-5">
       <div>
         <h2 class="text-[16px] font-semibold tracking-tight text-ink">Webhook 推送通道调试台</h2>
-        <p class="mt-1 text-[12px] text-muted">仅用于单次连通性测试，不写入配置；下方配置项均为修改即自动保存</p>
+        <p class="mt-1 text-[12px] text-muted">「触发单次测试」只发一条测试消息、不写配置；「保存渠道配置」写入 config.local.ini（不进 git），下次打开自动回填</p>
       </div>
 
       <div class="mt-4 grid grid-cols-1 gap-4 md:grid-cols-3">
@@ -41,19 +41,33 @@
 
       <div class="mt-4 flex items-center justify-between gap-4 border-t border-hairline pt-4">
         <div class="min-w-0 text-[12px]">
+          <span v-if="loadingChannel" class="text-muted-soft">正在读取已保存配置…</span>
           <span
-            v-if="testResult"
+            v-else-if="testResult"
             :class="testResult.ok ? 'text-accent-green' : 'font-medium text-accent'"
           >
             {{ testResult.ok ? '测试推送发送成功' : `推送失败: ${testResult.err || testResult.body}` }}
           </span>
           <span v-else class="text-muted-soft">尚未测试</span>
+          <p v-if="defaultChannelHint" class="mt-1 truncate text-[11px] text-muted-soft">
+            {{ defaultChannelHint }}
+          </p>
         </div>
 
-        <button @click="handleTestPush" :disabled="testing" class="btn-primary flex-shrink-0">
-          <span v-if="testing" class="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent"></span>
-          <span>触发单次测试</span>
-        </button>
+        <div class="flex flex-shrink-0 items-center gap-2">
+          <button
+            @click="handleSaveChannel"
+            :disabled="loadingChannel || savingChannel"
+            class="tactile-button flex h-[38px] items-center gap-1.5 rounded-xl border border-hairline bg-surface-soft px-3.5 text-[12px] font-medium text-ink transition-colors hover:border-ink/30 disabled:opacity-50"
+          >
+            <span v-if="savingChannel" class="h-3 w-3 animate-spin rounded-full border-2 border-muted border-t-transparent"></span>
+            <span>{{ savingChannel ? '保存中…' : (savedChannelOk ? '已保存' : '保存渠道配置') }}</span>
+          </button>
+          <button @click="handleTestPush" :disabled="testing" class="btn-primary">
+            <span v-if="testing" class="h-3 w-3 animate-spin rounded-full border-2 border-white border-t-transparent"></span>
+            <span>触发单次测试</span>
+          </button>
+        </div>
       </div>
     </section>
 
@@ -363,6 +377,32 @@ const testWebhook = ref('')
 const testSecret = ref('')
 const testing = ref(false)
 const testResult = ref<any>(null)
+const loadingChannel = ref(false)
+const savingChannel = ref(false)
+const savedChannelOk = ref(false)
+let savedTimer: number | null = null
+
+// 渠道 → [push] 里的真实配置键。必须与 core/push.py 读取的键一致，
+// 否则「测试通过」和「正式推送能跑」会变成两回事。
+const channelConfigKeys: Record<string, { url: string; secret: string }> = {
+  pushdeer: { url: 'endpoint', secret: 'pushkey' },
+  feishu: { url: 'feishu_webhook', secret: 'feishu_secret' },
+  wecom: { url: 'wecom_webhook', secret: 'wecom_key' },
+  dingtalk: { url: 'dingtalk_webhook', secret: 'dingtalk_secret' },
+  bark: { url: 'bark_url', secret: 'bark_key' },
+  telegram: { url: 'telegram_bot_token', secret: 'telegram_chat_id' },
+  serverchan: { url: 'webhook', secret: 'serverchan_sendkey' },
+}
+
+const currentChannelKeys = computed(() => channelConfigKeys[testChannel.value] || null)
+
+// 保存只写「本渠道凭据」，不改默认渠道；这里只提示，不替用户改。
+const defaultChannelHint = computed(() => {
+  const raw = String(configSections.value?.push?.channel || '').trim()
+  const list = raw.split(',').map((s: string) => s.trim()).filter(Boolean)
+  if (!list.length || list.includes(testChannel.value)) return ''
+  return `正式推送默认渠道为 ${list.join('、')}，本渠道凭据仅保存备用`
+})
 
 const loadingConfig = ref(false)
 const showKey = ref(false)
@@ -472,9 +512,7 @@ async function handleTestPush() {
   try {
     const res = await api.testPush({
       channel: testChannel.value,
-      webhook: testWebhook.value || undefined,
-      secret: testSecret.value || undefined,
-      pushkey: testSecret.value || undefined,
+      fields: channelFields(),
     })
     testResult.value = res
   } catch (e: any) {
@@ -483,6 +521,67 @@ async function handleTestPush() {
     testing.value = false
   }
 }
+
+function channelFields(): Record<string, string> {
+  const keys = currentChannelKeys.value
+  if (!keys) return {}
+  return {
+    [keys.url]: testWebhook.value.trim(),
+    [keys.secret]: testSecret.value.trim(),
+  }
+}
+
+// 打开页面 / 切渠道时，把已保存的地址与密钥回填到输入框。
+// GET /config 是掩码的，这里按字段走 /config/secret 取真实值。
+async function loadChannelValues() {
+  const keys = currentChannelKeys.value
+  const ch = testChannel.value
+  testResult.value = null
+  savedChannelOk.value = false
+  loadingChannel.value = true
+  try {
+    if (!keys) {
+      testWebhook.value = ''
+      testSecret.value = ''
+      return
+    }
+    const [urlRes, secretRes] = await Promise.all([
+      api.revealSecret('push', keys.url),
+      api.revealSecret('push', keys.secret),
+    ])
+    // 快速切渠道时，只接受当前渠道的结果
+    if (ch !== testChannel.value) return
+    testWebhook.value = urlRes.configured ? urlRes.value : ''
+    testSecret.value = secretRes.configured ? secretRes.value : ''
+  } catch {
+    if (ch === testChannel.value) {
+      testWebhook.value = ''
+      testSecret.value = ''
+    }
+  } finally {
+    if (ch === testChannel.value) loadingChannel.value = false
+  }
+}
+
+async function handleSaveChannel() {
+  const keys = currentChannelKeys.value
+  if (!keys) return
+  savingChannel.value = true
+  savedChannelOk.value = false
+  try {
+    // 只提交本渠道的两个键：其余键不传，避免掩码值或无关字段被覆盖
+    await api.updateConfig({ push: channelFields() })
+    savedChannelOk.value = true
+    if (savedTimer) clearTimeout(savedTimer)
+    savedTimer = window.setTimeout(() => { savedChannelOk.value = false }, 2000)
+  } catch (e: any) {
+    testResult.value = { ok: false, err: `保存失败: ${e.message}` }
+  } finally {
+    savingChannel.value = false
+  }
+}
+
+watch(testChannel, loadChannelValues)
 
 // ---- 自动保存：改动后 debounce 700ms 落盘，成功后闪一下「已保存」 ----
 const saveFlash = ref('')          // '' | 'ok' | 'error'
@@ -573,12 +672,14 @@ async function toggleShowKey() {
   }
 }
 
-onMounted(() => {
-  loadConfigData()
+onMounted(async () => {
+  await loadConfigData()
+  loadChannelValues()
 })
 
 onUnmounted(() => {
   if (saveTimer) clearTimeout(saveTimer)
   if (flashTimer) clearTimeout(flashTimer)
+  if (savedTimer) clearTimeout(savedTimer)
 })
 </script>

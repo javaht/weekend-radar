@@ -62,10 +62,15 @@ def list_events(
     price_tier: str = Query(None, description="价格档位: free / under100 / mid / high / unknown"),
     start_date_ge: str = Query(None, description="开始日期起始"),
     start_date_le: str = Query(None, description="开始日期截止"),
+    city: str = Query(None, description="城市（默认取配置城市）"),
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
 ):
-    store = get_store()
+    cfg, _ = get_cfg(city)
+    city_name = cfg["radar"].get("city", "北京")
+    base_cfg, _ = get_cfg()
+    base_city = base_cfg["radar"].get("city", "北京")
+    store = get_store(default_city=base_city)
     try:
         return store.query_events(
             status=status if status else None,
@@ -76,6 +81,7 @@ def list_events(
             price_tier=price_tier,
             start_date_ge=start_date_ge,
             start_date_le=start_date_le,
+            city=city_name,
             limit=limit,
             offset=offset,
         )
@@ -86,10 +92,11 @@ def list_events(
 @router.get("/events/grouped")
 def get_grouped_events(city: str = Query(None, description="指定城市")):
     cfg, _ = get_cfg(city)
-    # 库里数据是「配置城市」采集的，没有 city 列做物理隔离；
-    # 把真实采集城市回给前端，切到别的城市时明确提示，避免误导。
+    # events 表有 city 列：按所选城市过滤，不再把北京数据当成深圳展示。
+    # 数据缺列的老库会在 Store 初始化时用 base 城市回填一次。
     base_cfg, _ = get_cfg()
-    data_city = base_cfg["radar"].get("city", "北京")
+    base_city = base_cfg["radar"].get("city", "北京")
+    city_name = cfg["radar"].get("city", "北京")
     today = datetime.date.today()
     days = as_int(cfg, "radar", "window_days", 30)
     groups = TR.weekend_groups(today, days)
@@ -105,9 +112,9 @@ def get_grouped_events(city: str = Query(None, description="指定城市")):
         "parse_date": TR.parse_date,
     }
 
-    store = get_store(cfg)
+    store = get_store(cfg, default_city=base_city)
     try:
-        events = store.get_active_events_as_objects()
+        events = store.get_active_events_as_objects(city=city_name)
         layout = _layout(events, groups, today, days, meta)
 
         def ser(e, extra=None):
@@ -131,7 +138,10 @@ def get_grouped_events(city: str = Query(None, description="指定城市")):
 
         return {
             "city": meta["city"],
-            "data_city": data_city,
+            # data_city = 该城市确实有数据时的城市名；没数据返回空，
+            # 前端据此显示「暂无数据，执行一次任务」而不是拿别的城市顶替。
+            "data_city": city_name if events else "",
+            "has_data": bool(events),
             "today": today.isoformat(),
             "window_days": days,
             "total_active": len(events),
