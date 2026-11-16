@@ -6,6 +6,8 @@ __pycache__/
 # 私有密钥绝不能进镜像层：.gitignore 只管 git，管不到 docker build context
 config.local.ini
 web/node_modules/
+# dist 由 Dockerfile 的 node 阶段构建，不把本地旧产物塞进上下文
+web/dist/
 data/*.sqlite*
 data/*.log
 data/reports/*.md

@@ -58,6 +58,13 @@ jobs:
           curl -fsS http://127.0.0.1:8000/api/radar/schedules
           curl -fsS "http://127.0.0.1:8000/api/events/grouped?city=%E5%8C%97%E4%BA%AC" > /dev/null
 
+          # 前端产物必须真的打进镜像：首页是打包后的 index.html，静态资源可取
+          curl -fsS http://127.0.0.1:8000/ | grep -q "Weekend Radar"
+          asset=$(curl -fsS http://127.0.0.1:8000/ | grep -oE '/assets/[^"]+\.js' | head -n1)
+          test -n "$asset"
+          echo "frontend asset: $asset"
+          curl -fsS "http://127.0.0.1:8000${asset}" -o /dev/null
+
       - name: 检查启动日志无异常栈
         run: |
           docker logs radar-ci > /tmp/container.log 2>&1
