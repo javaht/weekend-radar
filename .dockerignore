@@ -9,4 +9,6 @@ web/node_modules/
 data/*.sqlite*
 data/*.log
 data/reports/*.md
+# 定时任务是运行时状态，不该烤进镜像
+data/schedule*
 tests/_selftest*

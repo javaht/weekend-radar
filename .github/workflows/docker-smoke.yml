@@ -1,0 +1,76 @@
+name: Docker 启动冒烟测试
+
+# 目的：每次 push / PR 都真起一次容器，确认镜像能构建、服务能启动、
+# 健康检查与只读接口可用、日志里没有异常栈。只做启动验证，不联网抓取。
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: docker-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  docker-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 构建镜像
+        run: docker build -t weekend-radar:ci .
+
+      - name: 镜像内离线自测
+        run: docker run --rm weekend-radar:ci --self-test
+
+      - name: 启动容器（serve 模式）
+        run: |
+          docker run -d --name radar-ci \
+            -e TZ=Asia/Shanghai \
+            -p 8000:8000 \
+            weekend-radar:ci --serve --host 0.0.0.0 --port 8000
+
+      - name: 等待健康检查通过
+        run: |
+          code="000"
+          for i in $(seq 1 60); do
+            code=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:8000/api/health || true)
+            if [ "$code" = "200" ]; then
+              echo "健康检查通过（第 ${i} 秒）"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "60 秒内健康检查未通过，最后状态码: ${code}"
+          exit 1
+
+      - name: 校验容器存活与只读接口
+        run: |
+          running=$(docker inspect radar-ci --format '{{.State.Running}}')
+          echo "container running: $running"
+          test "$running" = "true"
+
+          curl -fsS http://127.0.0.1:8000/api/radar/status
+          curl -fsS http://127.0.0.1:8000/api/radar/schedules
+          curl -fsS "http://127.0.0.1:8000/api/events/grouped?city=%E5%8C%97%E4%BA%AC" > /dev/null
+
+      - name: 检查启动日志无异常栈
+        run: |
+          docker logs radar-ci > /tmp/container.log 2>&1
+          cat /tmp/container.log
+          if grep -qE "Traceback \(most recent call last\)|ERROR:" /tmp/container.log; then
+            echo "容器日志中存在异常"
+            exit 1
+          fi
+
+      - name: 失败时输出容器日志
+        if: failure()
+        run: docker logs radar-ci || true
+
+      - name: 清理容器
+        if: always()
+        run: docker rm -f radar-ci || true
