@@ -5,6 +5,8 @@ data/*.sqlite*
 data/*.db*
 data/*.log
 data/reports/*.md
+# 定时任务为运行时状态：不同机器/不同部署各自维护，不入库
+data/schedule*
 tests/_selftest*
 .env
 config.local.ini

@@ -2,7 +2,8 @@
 """雷达任务执行、逐源健康探测、离线单测与 SSE 实时日志。"""
 import asyncio
 import datetime
-from typing import Optional
+import re
+from typing import List, Optional
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
@@ -11,6 +12,9 @@ import run
 from server.deps import (
     task_lock, task_status, update_task_status, get_cfg,
     clear_stop, request_stop, stop_requested,
+)
+from server.scheduler import (
+    load_schedules, save_schedules, next_run as schedule_next_run,
 )
 from server.logger import bus_logger
 from server.auth import require_write
@@ -35,6 +39,13 @@ class ProbeTaskRequest(BaseModel):
     city: Optional[str] = None
 
 
+class ScheduleRequest(BaseModel):
+    mode: str = "daily"
+    time: str = "09:00"
+    weekdays: List[int] = []
+    city: Optional[str] = None
+
+
 # 写操作必须过鉴权；日志流 / 状态是只读，单独放行（不挂在 router 级）
 WRITE_DEPS = [Depends(require_write)]
 
@@ -44,6 +55,90 @@ def get_status():
     # stopping：已发停止请求但当前源还没跑完。前端用它把状态从
     # 「RUN 中」切成「停止中」，避免看起来还在正常执行。
     return {**task_status, "stopping": bool(task_status.get("running") and stop_requested())}
+
+
+def _schedule_out(item):
+    nxt = schedule_next_run(item)
+    return {
+        "id": item["id"],
+        "mode": item["mode"],
+        "time": item["time"],
+        "weekdays": item["weekdays"],
+        # city 是保存时写的原值（空 = 跟随配置城市）
+        "city": item["city"],
+        "effective_city": item["eff_city"],
+        "next_run": nxt.isoformat(timespec="minutes") if nxt else None,
+    }
+
+
+def _schedule_items(cfg):
+    return [_schedule_out(x) for x in load_schedules(cfg)]
+
+
+@router.get("/schedules")
+def get_schedules():
+    cfg, _ = get_cfg()
+    return {"items": _schedule_items(cfg)}
+
+
+@router.put("/schedules", dependencies=WRITE_DEPS)
+def upsert_schedule(req: ScheduleRequest):
+    """按城市覆盖保存：同一城市只有一个定时，重复保存 = 更新。"""
+    raw = (req.time or "").strip()
+    if not re.fullmatch(r"\d{1,2}:\d{2}", raw):
+        raise HTTPException(status_code=400, detail="time 需为 HH:MM")
+    hh, mm = [int(x) for x in raw.split(":")]
+    if not (0 <= hh < 24 and 0 <= mm < 60):
+        raise HTTPException(status_code=400, detail="time 超出范围")
+    mode = (req.mode or "daily").strip().lower()
+    if mode not in ("daily", "weekly"):
+        raise HTTPException(status_code=400, detail="mode 仅支持 daily / weekly")
+    days = sorted({d for d in (req.weekdays or [])
+                   if isinstance(d, int) and 1 <= d <= 7})
+    if mode == "weekly" and not days:
+        raise HTTPException(status_code=400, detail="weekly 模式至少要选一个星期")
+    if mode == "daily":
+        days = list(range(1, 8))
+    city = (req.city or "").strip()
+    if len(city) > 20:
+        raise HTTPException(status_code=400, detail="城市名过长")
+
+    cfg, _ = get_cfg()
+    eff_city = city or str(cfg["radar"].get("city", "北京") or "北京")
+    items = load_schedules(cfg)
+    payload = {
+        "mode": mode,
+        "time": "%02d:%02d" % (hh, mm),
+        "weekdays": days,
+        "city": city,
+    }
+    updated = False
+    for i, item in enumerate(items):
+        if item["eff_city"] == eff_city:
+            payload["id"] = item["id"]
+            items[i] = payload
+            updated = True
+            break
+    if not updated:
+        items.append(payload)
+    saved = save_schedules(items, cfg)
+    bus_logger.log("[定时] 已%s定时任务：城市 %s · %s %s" % (
+        "更新" if updated else "新增", eff_city,
+        "每天" if mode == "daily" else "每周",
+        "%02d:%02d" % (hh, mm)))
+    return {"items": [_schedule_out(x) for x in saved]}
+
+
+@router.delete("/schedules/{sid}", dependencies=WRITE_DEPS)
+def delete_schedule(sid: str):
+    cfg, _ = get_cfg()
+    items = load_schedules(cfg)
+    remain = [x for x in items if x["id"] != sid]
+    if len(remain) == len(items):
+        raise HTTPException(status_code=404, detail="定时任务不存在")
+    saved = save_schedules(remain, cfg)
+    bus_logger.log("[定时] 已删除定时任务 %s" % sid)
+    return {"items": [_schedule_out(x) for x in saved]}
 
 
 @router.get("/logs/stream")

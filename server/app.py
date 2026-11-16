@@ -36,7 +36,17 @@ app.add_middleware(
 async def _on_startup():
     # run_in_executor 里的任务在工作线程打日志，需要主 loop 才能线程安全地投递到 SSE 队列
     import asyncio
-    bus_logger.set_loop(asyncio.get_running_loop())
+    loop = asyncio.get_running_loop()
+    bus_logger.set_loop(loop)
+    # 进程内定时任务（依赖服务常驻）
+    from server.scheduler import scheduler
+    scheduler.start(loop)
+
+
+@app.on_event("shutdown")
+async def _on_shutdown():
+    from server.scheduler import scheduler
+    await scheduler.stop()
 
 
 app.include_router(events.router)

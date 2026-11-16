@@ -59,6 +59,16 @@ export interface TaskStatus {
   last_result?: Record<string, any>
 }
 
+export interface ScheduleItem {
+  id: string
+  mode: 'daily' | 'weekly'
+  time: string
+  weekdays: number[]
+  city: string
+  effective_city: string
+  next_run?: string | null
+}
+
 export interface SourceProbeItem {
   name: string
   enabled: boolean
@@ -145,6 +155,16 @@ export const api = {
   stopRun: () =>
     request<{ message: string }>('/api/radar/stop', {
       method: 'POST',
+    }),
+  getSchedules: () => request<{ items: ScheduleItem[] }>('/api/radar/schedules'),
+  saveSchedule: (payload: { mode: string; time: string; weekdays: number[]; city: string }) =>
+    request<{ items: ScheduleItem[] }>('/api/radar/schedules', {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+  deleteSchedule: (id: string) =>
+    request<{ items: ScheduleItem[] }>(`/api/radar/schedules/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
     }),
   triggerPlan: (payload: { city?: string }) =>
     request<any>('/api/radar/plan', {

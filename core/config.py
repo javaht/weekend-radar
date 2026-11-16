@@ -190,6 +190,19 @@ DEFAULTS = {
         # 一次变更连续几轮成立才认，压掉 LLM 措辞抖动
         "confirm_runs": "2",
     },
+    # 旧版单条定时：仅当 data/schedules.json 不存在且 enabled=true 时迁移一次。
+    # 新版的增删改走 Web 控制台，存 data/schedules.json。
+    "schedule": {
+        "enabled": "false",
+        # daily = 每天；weekly = 只在 weekdays 指定的星期
+        "mode": "daily",
+        # 本地时间 HH:MM
+        "time": "09:00",
+        # 1=周一 … 7=周日，逗号分隔
+        "weekdays": "1,2,3,4,5,6,7",
+        # 空 = 跟随 radar.city
+        "city": "",
+    },
     "llm": {
         # provider: magic | openai | anthropic | deepseek | siliconflow | openrouter | dashscope | zhipu | ollama | custom
         "provider": "magic",
